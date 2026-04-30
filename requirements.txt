@@ -1,0 +1,13 @@
+pandas
+numpy
+scipy
+scikit-learn
+hmmlearn
+xgboost
+pyarrow
+matplotlib
+pandas-market-calendars
+pyyaml
+joblib
+pytest
+yfinance

@@ -5,3 +5,23 @@ __pycache__/
 
 data/*
 !data/.gitkeep
+!data/raw/
+!data/raw/.gitkeep
+!data/cleaned/
+!data/cleaned/.gitkeep
+!data/features/
+!data/features/.gitkeep
+
+models/*
+!models/.gitkeep
+
+reports/*
+!reports/.gitkeep
+!reports/*.md
+!reports/figures/
+!reports/figures/.gitkeep
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store

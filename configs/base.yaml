@@ -1,0 +1,232 @@
+project:
+  name: ida-trading
+  asset: SPY
+  frequency: 5min
+  timezone: America/New_York
+
+paths:
+  raw_data: data/raw
+  cleaned_data: data/cleaned
+  features: data/features
+  models: models
+  reports: reports
+
+data:
+  provider: yfinance
+  symbol: SPY
+  download_period: 60d
+  download_interval: 5m
+  input_file: data/raw/spy_5min.parquet
+  cleaned_file: data/cleaned/spy_5min_clean.parquet
+  quality_report_file: reports/data_quality.md
+  features_file: data/features/features_base.parquet
+  labels_file: data/features/labels.parquet
+  hmm_features_file: data/features/hmm_features.parquet
+  signals_file: data/features/signals.parquet
+  timestamp_col: timestamp
+  ohlcv_columns:
+    - open
+    - high
+    - low
+    - close
+    - volume
+
+session:
+  market_open: "09:30"
+  market_close: "16:00"
+  timestamp_label: start
+  regular_session_only: true
+  drop_incomplete_sessions: true
+  expected_bars_per_session: 78
+
+calendar:
+  enabled: true
+  name: NYSE
+  drop_non_trading_days: true
+  drop_half_days: true
+
+quality:
+  drop_duplicate_timestamps: true
+  drop_critical_nan_rows: true
+  drop_invalid_price_rows: true
+  drop_negative_volume_rows: true
+  drop_extreme_range_rows: true
+  max_bar_range_bps: 1000.0
+
+features:
+  return_windows: [1, 2, 3, 6, 12]
+  realized_vol_windows: [3, 6, 12, 24]
+  atr_windows: [6, 12]
+  sma_windows: [6, 12, 24]
+  trend_windows: [6, 12, 24]
+  open_window_bars: 6
+  close_window_bars: 6
+  midday_start: "12:00"
+  midday_end: "14:00"
+
+labeling:
+  horizon_bars: 2
+  buffer_bps: 0.5
+  lambda_vol: 0.25
+  round_trip_cost_bps: 1.0
+
+hmm:
+  n_states: 4
+  covariance_type: diag
+  random_state: 42
+  n_iter: 200
+  train_fraction: 0.7
+  candidate_states: [2, 3, 4, 5, 6]
+  stability_seeds: [42, 7, 123]
+  diagnostic_n_iter: 100
+  model_file: models/hmm_k4.joblib
+  feature_columns:
+    - ret_1
+    - ret_3
+    - rv_6
+    - rv_12
+    - range
+    - rel_volume
+    - trend_12
+    - intraday_drawdown
+
+model:
+  baseline: logistic_regression
+  challenger: xgboost
+  random_state: 42
+  train_fraction: 0.6
+  validation_fraction: 0.2
+  test_fraction: 0.2
+  logistic_regression:
+    penalty: elasticnet
+    solver: saga
+    l1_ratio: 0.2
+    C: 0.5
+    max_iter: 5000
+    class_weight: balanced
+  calibration:
+    method: sigmoid
+  base_predictions_file: data/features/predictive_base_predictions.parquet
+  base_report_file: reports/predictive_base_report.md
+  hmm_predictions_file: data/features/predictive_hmm_predictions.parquet
+  hmm_report_file: reports/predictive_hmm_report.md
+  hmm_feature_columns:
+    - hmm_p0
+    - hmm_p1
+    - hmm_p2
+    - hmm_p3
+    - hmm_entropy
+    - hmm_max_prob
+    - hmm_state_0
+    - hmm_state_1
+    - hmm_state_2
+    - hmm_state_3
+  base_feature_columns:
+    - ret_1
+    - ret_2
+    - ret_3
+    - ret_6
+    - ret_12
+    - rv_3
+    - rv_6
+    - rv_12
+    - rv_24
+    - range
+    - atr_6
+    - atr_12
+    - sma_6
+    - sma_12
+    - sma_24
+    - trend_6
+    - trend_12
+    - trend_24
+    - vwap
+    - dist_vwap
+    - intraday_drawdown
+    - rel_volume
+    - sin_time
+    - cos_time
+    - minutes_to_close
+    - open_window
+    - close_window
+    - midday
+
+backtest:
+  allow_overnight: false
+  entry: next_open
+  base_round_trip_cost_bps: 1.0
+  conservative_round_trip_cost_bps: 2.0
+  stress_round_trip_cost_bps: 5.0
+  cost_scenario: base
+  trades_file: reports/backtest_trades.parquet
+  equity_file: reports/equity_curve.parquet
+  daily_pnl_file: reports/daily_pnl.parquet
+  report_file: reports/backtest_report.md
+  no_new_trades_after: "15:45"
+  force_flat_before: "15:55"
+
+costs:
+  base:
+    commission_bps_per_side: 0.00
+    spread_bps_per_side: 0.25
+    slippage_bps_per_side: 0.25
+    impact_bps_per_1pct_participation: 0.00
+  conservative:
+    commission_bps_per_side: 0.00
+    spread_bps_per_side: 0.50
+    slippage_bps_per_side: 0.50
+    impact_bps_per_1pct_participation: 0.00
+  stress:
+    commission_bps_per_side: 0.00
+    spread_bps_per_side: 1.25
+    slippage_bps_per_side: 1.25
+    impact_bps_per_1pct_participation: 0.00
+
+risk:
+  fixed_size: 1.0
+  volatility_scaling: true
+  target_sigma_h: 0.003
+  max_leverage: 1.0
+  stop_loss_bps: 10.0
+  time_stop_bars: 2
+  max_daily_loss: 0.02
+  max_trades_per_day: 10
+  cooldown_bars: 2
+  kill_switch_daily_loss: 0.03
+
+baselines:
+  random_seed: 42
+  random_prob_short: 0.3333333333
+  random_prob_flat: 0.3333333334
+  random_prob_long: 0.3333333333
+  momentum_column: ret_3
+  reversal_column: ret_3
+  signal_threshold_column: neutral_zone
+
+signal:
+  predictions_file: data/features/predictive_hmm_predictions.parquet
+  output_file: data/features/signals.parquet
+  report_file: reports/signal_report.md
+  theta_prob: 0.55
+  theta_score: 0.10
+  max_neutral: 0.55
+  max_hmm_entropy: 0.90
+  theta_prob_grid: [0.45, 0.50, 0.55, 0.60]
+  theta_score_grid: [0.00, 0.05, 0.10, 0.15]
+  max_neutral_grid: [0.55, 0.65, 0.75]
+  max_hmm_entropy_grid: [0.50, 0.70, 0.90, 1.00]
+  allowed_hmm_states: []
+
+walkforward:
+  train_months: 5
+  validation_months: 1
+  test_months: 1
+  step_months: 1
+  purge_bars: 2
+  embargo_bars: 0
+  output_dir: reports/walkforward
+  summary_file: reports/walkforward_folds_summary.md
+
+evaluation:
+  report_file: reports/walkforward_summary.md
+  metrics_file: reports/evaluation_metrics.parquet
