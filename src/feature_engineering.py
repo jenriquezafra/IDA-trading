@@ -38,6 +38,11 @@ def _grouped_rolling_mean(series: pd.Series, sessions: pd.Series, window: int) -
     )
 
 
+def _safe_ratio(numerator: pd.Series, denominator: pd.Series, eps: float = 1e-12) -> pd.Series:
+    safe_denominator = denominator.where(denominator.abs() > eps)
+    return numerator / safe_denominator
+
+
 def add_return_features(df: pd.DataFrame, windows: list[int]) -> pd.DataFrame:
     featured = df.copy()
     log_close = np.log(featured["close"])
@@ -95,6 +100,63 @@ def add_intraday_vwap_features(df: pd.DataFrame) -> pd.DataFrame:
 
     featured["vwap"] = cumulative_dollar_volume / cumulative_volume.replace(0, np.nan)
     featured["dist_vwap"] = np.log(featured["close"] / featured["vwap"])
+    return featured
+
+
+def add_volatility_ratio_features(df: pd.DataFrame) -> pd.DataFrame:
+    featured = df.copy()
+    if {"rv_3", "rv_12"}.issubset(featured.columns):
+        featured["vol_ratio_3_12"] = _safe_ratio(featured["rv_3"], featured["rv_12"])
+    if {"rv_6", "rv_24"}.issubset(featured.columns):
+        featured["vol_ratio_6_24"] = _safe_ratio(featured["rv_6"], featured["rv_24"])
+    return featured
+
+
+def add_trend_efficiency_features(df: pd.DataFrame, windows: list[int]) -> pd.DataFrame:
+    featured = df.copy()
+    signed_ret = np.sign(featured["ret_1"])
+    abs_ret = featured["ret_1"].abs()
+    for window in windows:
+        sum_ret = _grouped_rolling_sum(featured["ret_1"], featured["session"], int(window))
+        sum_abs_ret = _grouped_rolling_sum(abs_ret, featured["session"], int(window))
+        featured[f"signed_efficiency_{window}"] = _safe_ratio(sum_ret, sum_abs_ret)
+        featured[f"dir_persistence_{window}"] = _grouped_rolling_mean(signed_ret, featured["session"], int(window))
+    return featured
+
+
+def add_intraday_location_features(df: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
+    featured = df.copy()
+    atr_col = config.get("features", {}).get("location_atr_column", "atr_12")
+    if atr_col not in featured.columns:
+        raise ValueError(f"Missing ATR column for location features: {atr_col}")
+
+    grouped = featured.groupby("session", sort=False)
+    session_open = grouped["open"].transform("first")
+    high_so_far = grouped["high"].cummax()
+    low_so_far = grouped["low"].cummin()
+    session_range = high_so_far - low_so_far
+    atr = featured[atr_col]
+
+    featured["dist_open"] = np.log(featured["close"] / session_open)
+    featured["pos_session_range"] = _safe_ratio(featured["close"] - low_so_far, session_range)
+    featured["dist_session_high_atr"] = _safe_ratio(np.log(featured["close"] / high_so_far), atr)
+    featured["dist_session_low_atr"] = _safe_ratio(np.log(featured["close"] / low_so_far), atr)
+    featured["intraday_runup"] = _safe_ratio(np.log(featured["close"] / low_so_far), atr)
+
+    if "vwap" in featured.columns:
+        featured["dist_vwap_atr"] = _safe_ratio(np.log(featured["close"] / featured["vwap"]), atr)
+        vwap_window = int(config.get("features", {}).get("vwap_slope_window", 12))
+        previous_vwap = featured.groupby("session", sort=False)["vwap"].shift(vwap_window)
+        featured[f"vwap_slope_{vwap_window}"] = _safe_ratio(np.log(featured["vwap"] / previous_vwap), atr)
+    return featured
+
+
+def add_compression_expansion_features(df: pd.DataFrame) -> pd.DataFrame:
+    featured = df.copy()
+    if "range" in featured.columns:
+        range_mean_6 = _grouped_rolling_mean(featured["range"], featured["session"], 6)
+        range_mean_24 = _grouped_rolling_mean(featured["range"], featured["session"], 24)
+        featured["range_ratio_6_24"] = _safe_ratio(range_mean_6, range_mean_24)
     return featured
 
 
@@ -159,12 +221,16 @@ def build_features(cleaned: pd.DataFrame, config: dict[str, Any]) -> pd.DataFram
     featured = add_return_features(featured, feature_cfg.get("return_windows", [1, 2, 3, 6, 12]))
     featured = add_realized_volatility_features(featured, feature_cfg.get("realized_vol_windows", [3, 6, 12, 24]))
     featured = add_range_and_atr_features(featured, feature_cfg.get("atr_windows", [6, 12]))
+    featured = add_volatility_ratio_features(featured)
     featured = add_sma_and_trend_features(
         featured,
         feature_cfg.get("sma_windows", [6, 12, 24]),
         feature_cfg.get("trend_windows", [6, 12, 24]),
     )
+    featured = add_trend_efficiency_features(featured, feature_cfg.get("efficiency_windows", [12]))
     featured = add_intraday_vwap_features(featured)
+    featured = add_intraday_location_features(featured, config)
+    featured = add_compression_expansion_features(featured)
     featured = add_intraday_drawdown_feature(featured)
     featured = add_relative_volume_feature(featured)
     featured = add_time_features(featured, config)

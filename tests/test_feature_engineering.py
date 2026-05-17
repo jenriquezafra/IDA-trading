@@ -54,23 +54,35 @@ def test_build_features_creates_expected_columns() -> None:
         "ret_12",
         "rv_3",
         "rv_6",
-        "rv_12",
-        "rv_24",
-        "range",
-        "atr_6",
-        "atr_12",
-        "sma_6",
-        "sma_12",
-        "sma_24",
-        "trend_6",
-        "trend_12",
-        "trend_24",
-        "vwap",
-        "dist_vwap",
-        "intraday_drawdown",
-        "rel_volume",
-        "sin_time",
-        "cos_time",
+            "rv_12",
+            "rv_24",
+            "vol_ratio_3_12",
+            "vol_ratio_6_24",
+            "range",
+            "range_ratio_6_24",
+            "atr_6",
+            "atr_12",
+            "sma_6",
+            "sma_12",
+            "sma_24",
+            "trend_6",
+            "trend_12",
+            "trend_24",
+            "signed_efficiency_12",
+            "dir_persistence_12",
+            "vwap",
+            "dist_vwap",
+            "dist_vwap_atr",
+            "vwap_slope_12",
+            "dist_open",
+            "pos_session_range",
+            "dist_session_high_atr",
+            "dist_session_low_atr",
+            "intraday_drawdown",
+            "intraday_runup",
+            "rel_volume",
+            "sin_time",
+            "cos_time",
         "minutes_to_close",
         "open_window",
         "close_window",
@@ -94,6 +106,8 @@ def test_returns_and_rolling_features_do_not_cross_sessions() -> None:
     assert np.isnan(second_session.loc[0, "ret_1"])
     assert np.isnan(second_session.loc[0, "sma_6"])
     assert np.isnan(second_session.loc[0, "rv_3"])
+    assert np.isnan(second_session.loc[0, "signed_efficiency_12"])
+    assert np.isnan(second_session.loc[0, "vwap_slope_12"])
     assert second_session.loc[5, "sma_6"] == np.mean([200, 201, 202, 203, 204, 205])
 
 
@@ -126,3 +140,16 @@ def test_time_features_match_session_boundaries() -> None:
     assert not features.loc[6, "open_window"]
     assert features.loc[72:, "close_window"].all()
     assert not features.loc[71, "close_window"]
+
+
+def test_intraday_structure_features_are_causal_and_bounded() -> None:
+    df = _session_frame("2024-01-02", 100.0, 1000)
+
+    features = build_features(df, _config())
+
+    assert np.isclose(features.loc[0, "dist_open"], np.log(100.0 / 99.9))
+    assert np.isclose(features.loc[12, "signed_efficiency_12"], 1.0)
+    assert np.isclose(features.loc[12, "dir_persistence_12"], 1.0)
+    assert (features["pos_session_range"].dropna().between(0.0, 1.0)).all()
+    assert (features["dist_session_high_atr"].dropna() <= 0.0).all()
+    assert (features["dist_session_low_atr"].dropna() >= 0.0).all()

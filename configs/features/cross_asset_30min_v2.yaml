@@ -1,0 +1,103 @@
+feature_set_version: cross_asset_v2_30min
+description: Causal 30min feature set focused on breakout quality, cross-asset confirmation, volume confirmation and prior daily levels.
+
+return_windows: [1, 2, 3, 4, 6, 8, 12, 24]
+range_ratio_short_window: 1
+range_ratio_long_window: 4
+range_ratio_windows:
+  - [1, 4]
+  - [2, 8]
+efficiency_window: 2
+efficiency_windows: [2, 4, 12]
+vwap_slope_window: 2
+vwap_slope_windows: [2, 4, 12]
+atr_windows: [2, 4, 12]
+frequency: 30min
+breadth_windows: [1, 2, 4, 6, 12]
+
+setup_features:
+  opening_range_bars: [1, 2, 4, 6, 12]
+  rolling_breakout_windows: [2, 4, 6, 8]
+  realized_vol_windows: [1, 2, 4, 6, 12]
+  expected_by_bar_min_periods: 20
+  atr_column: target_atr_2
+  breakout_persistence_windows: [2, 3]
+  volume_accel_windows: [2, 4]
+  lunch_start: "12:00"
+  lunch_end: "14:00"
+
+groups:
+  indices: [SPY, QQQ, IWM, DIA]
+  sectors: [XLK, XLF, XLE, XLV, XLY, XLP, XLU]
+  growth: [QQQ, XLK, XLY]
+  cyclicals: [IWM, XLY, XLF, XLE]
+  defensives: [XLP, XLV, XLU]
+  bonds: [TLT, IEF]
+  credit_risk: [HYG]
+  credit_quality: [LQD]
+  haven: [TLT, IEF, GLD]
+  commodities: [GLD, USO]
+
+hmm_feature_columns:
+  - target_ret_1
+  - target_ret_2
+  - target_ret_4
+  - target_ret_6
+  - target_range_ratio_1_4
+  - target_signed_efficiency_2
+  - target_dir_persistence_2
+  - target_dist_vwap_atr_2
+  - target_dist_open
+  - target_pos_session_range
+  - target_pos_prev_session_range
+  - target_dist_prev_high_atr
+  - target_dist_prev_low_atr
+  - target_breakout_margin_or_1_high_atr
+  - target_breakdown_margin_or_1_low_atr
+  - target_or_1_range_atr
+  - target_above_or_1_high_persist_2
+  - target_breakout_attempt_count_or_1_high
+  - target_rel_volume_by_bar
+  - target_rel_cum_volume_by_bar
+  - target_rel_volume_accel_2
+  - target_rv_2_rel_by_bar
+  - relopen_QQQ_SPY
+  - relopen_IWM_SPY
+  - relopen_DIA_SPY
+  - relret_QQQ_SPY_6
+  - relret_IWM_SPY_6
+  - relret_DIA_SPY_6
+  - relret_XLK_SPY_6
+  - relret_XLP_SPY_6
+  - relret_TLT_SPY_12
+  - relret_IEF_SPY_12
+  - relret_GLD_SPY_12
+  - relret_HYG_LQD_12
+  - spread_growth_defensive_open
+  - spread_cyclicals_defensive_open
+  - spread_tech_broad_open
+  - spread_growth_defensive_12
+  - spread_cyclicals_defensive_12
+  - spread_tech_broad_12
+  - spread_equity_bonds_12
+  - spread_equity_gold_12
+  - spread_credit_12
+  - positive_index_count_2
+  - positive_sector_count_2
+  - positive_index_count_open
+  - positive_sector_count_open
+  - index_above_vwap_count
+  - sector_above_vwap_count
+  - sector_rel_strength_count_open
+  - sector_rel_strength_count_6
+  - leadership_concentration_score_6
+  - market_range_ratio_1_4
+  - sector_range_dispersion_12
+  - cross_asset_vol_expansion_score
+  - risk_on_open_confirmation
+  - intraday_stress_score
+  - risk_on_score
+  - risk_off_score
+  - defensive_rotation_score
+  - narrow_rally_score
+  - chop_score

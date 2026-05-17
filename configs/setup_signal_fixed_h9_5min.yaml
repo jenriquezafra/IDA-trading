@@ -1,0 +1,93 @@
+project:
+  name: ida-trading
+  timezone: America/New_York
+  frequency: 5min
+lab:
+  target_symbol: SPY
+  timeframe: 5min
+  universe_id: core_cross_asset_v1
+paths:
+  features_dir: data/features
+  results_dir: results/h9_fixed_rules/spy_qqq_ko_amd_googl_5min_24_6_6_step3
+  reports_dir: reports/h9_fixed_rules/spy_qqq_ko_amd_googl_5min_24_6_6_step3
+hmm_lab:
+  feature_set_version: cross_asset_v1
+  features_config: configs/features/cross_asset_v1.yaml
+  max_folds: 9
+  walk_forward:
+    train_months: 24
+    validation_months: 6
+    test_months: 6
+    step_months: 3
+setup_signal_search:
+  horizons: [12, 24]
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+setup_signal_fixed_rules:
+  targets: [SPY, QQQ, KO, AMD, GOOGL]
+  results_dir: results/h9_fixed_rules/spy_qqq_ko_amd_googl_5min_24_6_6_step3/_fixed_rules
+  reports_dir: reports/h9_fixed_rules/spy_qqq_ko_amd_googl_5min_24_6_6_step3/_fixed_rules
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+  min_positive_targets: 3
+  report_top_rows: 120
+  rules:
+    - name: ob60_long_basic_h24
+      family: opening_bias_followthrough
+      direction: long
+      horizon_bars: 24
+      params:
+        bias_attempts_min: 1
+        rel_volume_min: 0.65
+        close_location_min: 0.45
+        vwap_floor: 0.0
+        vwap_ceiling: 0.75
+        dist_open_min: 0.0
+        min_minutes_from_open: 60
+        min_minutes_to_close: 45
+    - name: ob60_long_breadth_h24
+      family: opening_bias_followthrough
+      direction: long
+      horizon_bars: 24
+      params:
+        bias_attempts_min: 1
+        rel_volume_min: 0.65
+        close_location_min: 0.45
+        vwap_floor: -0.25
+        vwap_ceiling: 0.75
+        dist_open_min: 0.0
+        positive_index_min: 2
+        positive_sector_min: 4
+        min_minutes_from_open: 60
+        min_minutes_to_close: 45
+    - name: ob60_short_basic_h24
+      family: opening_bias_followthrough
+      direction: short
+      horizon_bars: 24
+      params:
+        bias_attempts_min: 1
+        rel_volume_min: 0.75
+        close_location_min: 0.45
+        vwap_floor: 0.0
+        vwap_ceiling: 1.25
+        dist_open_min: 0.0
+        min_minutes_from_open: 60
+        min_minutes_to_close: 45
+candidate_cost_sensitivity_cross_asset:
+  cost_bps: [1.0, 2.0, 5.0]
+  ibkr:
+    enabled: true
+    plans: [tiered, fixed]
+    notionals_usd: [5000, 10000, 25000]
+    spread_slippage_bps_round_trip: 1.5
+    tiered_commission_per_share_usd: 0.0035
+    tiered_min_commission_per_order_usd: 0.35
+    tiered_clearing_per_share_per_side_usd: 0.0002
+    fixed_commission_per_share_usd: 0.005
+    fixed_min_commission_per_order_usd: 1.0
+    max_commission_pct_trade_value: 0.01
+    sec_fee_rate_on_sell: 0.0000206
+    finra_taf_per_share_on_sell_usd: 0.000195
+    finra_taf_cap_usd: 9.79

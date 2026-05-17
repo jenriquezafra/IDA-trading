@@ -1,0 +1,70 @@
+feature_set_version: cross_asset_v1
+description: Compact causal cross-asset features for SPY 5min HMM regime research.
+
+return_windows: [1, 3, 6, 12, 24]
+range_ratio_short_window: 6
+range_ratio_long_window: 24
+efficiency_window: 12
+vwap_slope_window: 12
+frequency: 5min
+
+setup_features:
+  opening_range_bars: [3, 6, 12]
+  rolling_breakout_windows: [12, 24]
+  realized_vol_windows: [3, 6, 12, 24]
+  expected_by_bar_min_periods: 20
+  lunch_start: "12:00"
+  lunch_end: "14:00"
+
+groups:
+  indices: [SPY, QQQ, IWM, DIA]
+  sectors: [XLK, XLF, XLE, XLV, XLY, XLP, XLU]
+  growth: [QQQ, XLK, XLY]
+  cyclicals: [IWM, XLY, XLF, XLE]
+  defensives: [XLP, XLV, XLU]
+  bonds: [TLT, IEF]
+  credit_risk: [HYG]
+  credit_quality: [LQD]
+  haven: [TLT, IEF, GLD]
+  commodities: [GLD, USO]
+
+hmm_feature_columns:
+  - target_ret_3
+  - target_ret_6
+  - target_ret_12
+  - target_range_ratio_6_24
+  - target_signed_efficiency_12
+  - target_dir_persistence_12
+  - target_dist_vwap_atr
+  - target_dist_open
+  - target_pos_session_range
+  - target_intraday_runup
+  - relret_QQQ_SPY_6
+  - relret_IWM_SPY_6
+  - relret_DIA_SPY_6
+  - relret_XLK_SPY_6
+  - relret_XLP_SPY_6
+  - relret_TLT_SPY_12
+  - relret_IEF_SPY_12
+  - relret_GLD_SPY_12
+  - relret_HYG_LQD_12
+  - spread_growth_defensive_12
+  - spread_cyclicals_defensive_12
+  - spread_tech_broad_12
+  - spread_equity_bonds_12
+  - spread_equity_gold_12
+  - spread_credit_12
+  - positive_index_count_6
+  - positive_sector_count_6
+  - sector_above_vwap_count
+  - sector_rel_strength_count_12
+  - leadership_concentration_score_12
+  - market_range_ratio_6_24
+  - sector_range_dispersion_12
+  - cross_asset_vol_expansion_score
+  - intraday_stress_score
+  - risk_on_score
+  - risk_off_score
+  - defensive_rotation_score
+  - narrow_rally_score
+  - chop_score

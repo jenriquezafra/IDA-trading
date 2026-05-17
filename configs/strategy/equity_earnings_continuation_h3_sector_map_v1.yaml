@@ -1,0 +1,133 @@
+mapping_id: equity_earnings_continuation_h3_sector_map_v1
+hypothesis_id: H3
+status: static_seed_pending_historical_audit
+as_of_contract: "2026-05-15"
+description: >
+  Sector and industry seed map for H3 earnings continuation. The map provides
+  a versioned sector ETF proxy and coarse industry group for screening. It is
+  not a final point-in-time GICS history.
+
+historical_audit:
+  primary_source: polygon_massive_ticker_overview
+  endpoint: /v3/reference/tickers/{ticker}
+  query_date_policy: query_ticker_details_as_of_event_date
+  fields_to_capture:
+    - cik
+    - sic_code
+    - sic_description
+    - market_cap
+    - active
+    - delisted_utc
+    - list_date
+  sec_crosscheck: sec_sic_code_list_and_filing_headers
+  promotion_requirement: >
+    Freeze review requires either point-in-time sector/industry history from a
+    vendor or a documented SIC/as-of-date audit showing sector proxy changes do
+    not alter the selected result.
+
+sector_proxies:
+  communication_services: XLC
+  consumer_discretionary: XLY
+  consumer_staples: XLP
+  energy: XLE
+  financials: XLF
+  healthcare: XLV
+  industrials: XLI
+  materials: XLB
+  real_estate: XLRE
+  technology: XLK
+  utilities: XLU
+
+records:
+  - {symbol: AAPL, sector_id: technology, sector_proxy: XLK, industry_group: technology_hardware}
+  - {symbol: ABBV, sector_id: healthcare, sector_proxy: XLV, industry_group: pharmaceuticals}
+  - {symbol: ABT, sector_id: healthcare, sector_proxy: XLV, industry_group: healthcare_equipment}
+  - {symbol: ADBE, sector_id: technology, sector_proxy: XLK, industry_group: application_software}
+  - {symbol: AMD, sector_id: technology, sector_proxy: XLK, industry_group: semiconductors}
+  - {symbol: AMGN, sector_id: healthcare, sector_proxy: XLV, industry_group: biotechnology}
+  - {symbol: AMT, sector_id: real_estate, sector_proxy: XLRE, industry_group: telecom_tower_reit}
+  - {symbol: AMZN, sector_id: consumer_discretionary, sector_proxy: XLY, industry_group: broadline_retail}
+  - {symbol: APD, sector_id: materials, sector_proxy: XLB, industry_group: industrial_gases}
+  - {symbol: AVGO, sector_id: technology, sector_proxy: XLK, industry_group: semiconductors}
+  - {symbol: AXP, sector_id: financials, sector_proxy: XLF, industry_group: consumer_finance}
+  - {symbol: BA, sector_id: industrials, sector_proxy: XLI, industry_group: aerospace_defense}
+  - {symbol: BAC, sector_id: financials, sector_proxy: XLF, industry_group: banks}
+  - {symbol: BKNG, sector_id: consumer_discretionary, sector_proxy: XLY, industry_group: travel_services}
+  - {symbol: BLK, sector_id: financials, sector_proxy: XLF, industry_group: asset_management}
+  - {symbol: C, sector_id: financials, sector_proxy: XLF, industry_group: banks}
+  - {symbol: CAT, sector_id: industrials, sector_proxy: XLI, industry_group: machinery}
+  - {symbol: CI, sector_id: healthcare, sector_proxy: XLV, industry_group: managed_healthcare}
+  - {symbol: CL, sector_id: consumer_staples, sector_proxy: XLP, industry_group: household_products}
+  - {symbol: CMCSA, sector_id: communication_services, sector_proxy: XLC, industry_group: media_cable}
+  - {symbol: COF, sector_id: financials, sector_proxy: XLF, industry_group: consumer_finance}
+  - {symbol: COP, sector_id: energy, sector_proxy: XLE, industry_group: oil_gas_exploration}
+  - {symbol: COST, sector_id: consumer_staples, sector_proxy: XLP, industry_group: staples_retail}
+  - {symbol: CRM, sector_id: technology, sector_proxy: XLK, industry_group: application_software}
+  - {symbol: CSCO, sector_id: technology, sector_proxy: XLK, industry_group: communications_equipment}
+  - {symbol: CVS, sector_id: healthcare, sector_proxy: XLV, industry_group: healthcare_services}
+  - {symbol: CVX, sector_id: energy, sector_proxy: XLE, industry_group: integrated_oil_gas}
+  - {symbol: DE, sector_id: industrials, sector_proxy: XLI, industry_group: machinery}
+  - {symbol: DHR, sector_id: healthcare, sector_proxy: XLV, industry_group: life_sciences_tools}
+  - {symbol: DIS, sector_id: communication_services, sector_proxy: XLC, industry_group: entertainment}
+  - {symbol: DUK, sector_id: utilities, sector_proxy: XLU, industry_group: electric_utilities}
+  - {symbol: ELV, sector_id: healthcare, sector_proxy: XLV, industry_group: managed_healthcare}
+  - {symbol: ETN, sector_id: industrials, sector_proxy: XLI, industry_group: electrical_equipment}
+  - {symbol: FCX, sector_id: materials, sector_proxy: XLB, industry_group: metals_mining}
+  - {symbol: GE, sector_id: industrials, sector_proxy: XLI, industry_group: industrial_conglomerates}
+  - {symbol: GOOGL, sector_id: communication_services, sector_proxy: XLC, industry_group: interactive_media}
+  - {symbol: GS, sector_id: financials, sector_proxy: XLF, industry_group: capital_markets}
+  - {symbol: HD, sector_id: consumer_discretionary, sector_proxy: XLY, industry_group: home_improvement_retail}
+  - {symbol: HON, sector_id: industrials, sector_proxy: XLI, industry_group: industrial_conglomerates}
+  - {symbol: IBM, sector_id: technology, sector_proxy: XLK, industry_group: it_services}
+  - {symbol: INTC, sector_id: technology, sector_proxy: XLK, industry_group: semiconductors}
+  - {symbol: ISRG, sector_id: healthcare, sector_proxy: XLV, industry_group: healthcare_equipment}
+  - {symbol: JNJ, sector_id: healthcare, sector_proxy: XLV, industry_group: pharmaceuticals}
+  - {symbol: JPM, sector_id: financials, sector_proxy: XLF, industry_group: banks}
+  - {symbol: KO, sector_id: consumer_staples, sector_proxy: XLP, industry_group: beverages}
+  - {symbol: LIN, sector_id: materials, sector_proxy: XLB, industry_group: industrial_gases}
+  - {symbol: LLY, sector_id: healthcare, sector_proxy: XLV, industry_group: pharmaceuticals}
+  - {symbol: LMT, sector_id: industrials, sector_proxy: XLI, industry_group: aerospace_defense}
+  - {symbol: LOW, sector_id: consumer_discretionary, sector_proxy: XLY, industry_group: home_improvement_retail}
+  - {symbol: MA, sector_id: financials, sector_proxy: XLF, industry_group: payments}
+  - {symbol: MAR, sector_id: consumer_discretionary, sector_proxy: XLY, industry_group: hotels_resorts_cruise_lines}
+  - {symbol: MCD, sector_id: consumer_discretionary, sector_proxy: XLY, industry_group: restaurants}
+  - {symbol: MDT, sector_id: healthcare, sector_proxy: XLV, industry_group: healthcare_equipment}
+  - {symbol: META, sector_id: communication_services, sector_proxy: XLC, industry_group: interactive_media}
+  - {symbol: MDLZ, sector_id: consumer_staples, sector_proxy: XLP, industry_group: packaged_foods}
+  - {symbol: MRK, sector_id: healthcare, sector_proxy: XLV, industry_group: pharmaceuticals}
+  - {symbol: MS, sector_id: financials, sector_proxy: XLF, industry_group: capital_markets}
+  - {symbol: MSFT, sector_id: technology, sector_proxy: XLK, industry_group: systems_software}
+  - {symbol: MU, sector_id: technology, sector_proxy: XLK, industry_group: semiconductors}
+  - {symbol: NEE, sector_id: utilities, sector_proxy: XLU, industry_group: electric_utilities}
+  - {symbol: NFLX, sector_id: communication_services, sector_proxy: XLC, industry_group: entertainment}
+  - {symbol: NKE, sector_id: consumer_discretionary, sector_proxy: XLY, industry_group: apparel_footwear}
+  - {symbol: NOW, sector_id: technology, sector_proxy: XLK, industry_group: application_software}
+  - {symbol: NVDA, sector_id: technology, sector_proxy: XLK, industry_group: semiconductors}
+  - {symbol: ORCL, sector_id: technology, sector_proxy: XLK, industry_group: systems_software}
+  - {symbol: PANW, sector_id: technology, sector_proxy: XLK, industry_group: cybersecurity_software}
+  - {symbol: PEP, sector_id: consumer_staples, sector_proxy: XLP, industry_group: beverages_packaged_foods}
+  - {symbol: PFE, sector_id: healthcare, sector_proxy: XLV, industry_group: pharmaceuticals}
+  - {symbol: PG, sector_id: consumer_staples, sector_proxy: XLP, industry_group: household_personal_products}
+  - {symbol: PLD, sector_id: real_estate, sector_proxy: XLRE, industry_group: industrial_reit}
+  - {symbol: PM, sector_id: consumer_staples, sector_proxy: XLP, industry_group: tobacco}
+  - {symbol: QCOM, sector_id: technology, sector_proxy: XLK, industry_group: semiconductors}
+  - {symbol: RTX, sector_id: industrials, sector_proxy: XLI, industry_group: aerospace_defense}
+  - {symbol: SBUX, sector_id: consumer_discretionary, sector_proxy: XLY, industry_group: restaurants}
+  - {symbol: SCHW, sector_id: financials, sector_proxy: XLF, industry_group: capital_markets}
+  - {symbol: SLB, sector_id: energy, sector_proxy: XLE, industry_group: energy_equipment_services}
+  - {symbol: SO, sector_id: utilities, sector_proxy: XLU, industry_group: electric_utilities}
+  - {symbol: T, sector_id: communication_services, sector_proxy: XLC, industry_group: telecom_services}
+  - {symbol: TGT, sector_id: consumer_staples, sector_proxy: XLP, industry_group: staples_retail}
+  - {symbol: TJX, sector_id: consumer_discretionary, sector_proxy: XLY, industry_group: apparel_retail}
+  - {symbol: TMUS, sector_id: communication_services, sector_proxy: XLC, industry_group: telecom_services}
+  - {symbol: TMO, sector_id: healthcare, sector_proxy: XLV, industry_group: life_sciences_tools}
+  - {symbol: TSLA, sector_id: consumer_discretionary, sector_proxy: XLY, industry_group: automobiles}
+  - {symbol: TXN, sector_id: technology, sector_proxy: XLK, industry_group: semiconductors}
+  - {symbol: UNH, sector_id: healthcare, sector_proxy: XLV, industry_group: managed_healthcare}
+  - {symbol: UNP, sector_id: industrials, sector_proxy: XLI, industry_group: rail_transport}
+  - {symbol: UPS, sector_id: industrials, sector_proxy: XLI, industry_group: air_freight_logistics}
+  - {symbol: V, sector_id: financials, sector_proxy: XLF, industry_group: payments}
+  - {symbol: VZ, sector_id: communication_services, sector_proxy: XLC, industry_group: telecom_services}
+  - {symbol: WFC, sector_id: financials, sector_proxy: XLF, industry_group: banks}
+  - {symbol: WMT, sector_id: consumer_staples, sector_proxy: XLP, industry_group: staples_retail}
+  - {symbol: XOM, sector_id: energy, sector_proxy: XLE, industry_group: integrated_oil_gas}

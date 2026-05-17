@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IDA Research Lab</title>
+    <link rel="stylesheet" href="/static/styles.css?v=strategy-map-5" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">IDA</div>
+        <div class="brand-copy">
+          <h1>Research Lab</h1>
+          <p id="api-state" class="state-pill">Connecting</p>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="Primary">
+        <button class="nav-button is-active" data-view="operations"><span>Strategy Map</span></button>
+        <button class="nav-button" data-view="h8lab"><span>H8 Regime Lab</span></button>
+        <button class="nav-button" data-view="candidates"><span>Evidence</span></button>
+        <button class="nav-button" data-view="runs"><span>Registry</span></button>
+        <button class="nav-button" data-view="reports"><span>Reports</span></button>
+        <button class="nav-button" data-view="decisions"><span>Decisions</span></button>
+      </nav>
+
+      <div class="sidebar-live">
+        <span>Live module</span>
+        <strong id="sidebar-live-state">H1C</strong>
+        <small id="sidebar-live-detail">paper monitor</small>
+      </div>
+
+      <div class="sidebar-actions">
+        <button id="refresh-button" class="command-button" type="button">Refresh</button>
+        <button id="index-button" class="secondary-button" type="button">Index</button>
+      </div>
+    </aside>
+
+    <main class="shell">
+      <header class="topbar">
+        <div class="title-block">
+          <p class="eyebrow">IDA Trading</p>
+          <h2 id="view-title">Strategy Map</h2>
+          <p id="status-line">Loading registry</p>
+        </div>
+        <div class="topbar-status">
+          <span class="daemon-pill" id="daemon-pill">daemon unknown</span>
+        </div>
+      </header>
+
+      <section id="operations" class="view is-active">
+        <section class="visual-command">
+          <section class="map-hero">
+            <div class="hero-copy">
+              <p class="eyebrow">Hypothesis Portfolio</p>
+              <h3 id="portfolio-title">What happened to each strategy?</h3>
+              <p id="portfolio-read">
+                H1C promoted. Branch states stay visible.
+              </p>
+              <div id="portfolio-stats" class="portfolio-stats"></div>
+            </div>
+            <div class="hero-visual">
+              <canvas id="portfolio-map" width="520" height="300"></canvas>
+            </div>
+          </section>
+
+          <section class="primary-plots">
+            <article class="chart-card">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Backtest Plot</p>
+                  <h3 id="backtest-chart-title">Validation vs Test</h3>
+                </div>
+                <span id="backtest-chart-label">H1C</span>
+              </div>
+              <canvas id="backtest-chart" width="760" height="300"></canvas>
+            </article>
+
+            <article class="chart-card">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Simulation Plot</p>
+                  <h3>Cost Stress Curve</h3>
+                </div>
+                <span id="cost-chart-label">2-10 bps</span>
+              </div>
+              <canvas id="cost-chart" width="760" height="300"></canvas>
+            </article>
+          </section>
+        </section>
+
+        <section id="hypothesis-cards" class="hypothesis-cards" aria-label="Hypotheses"></section>
+
+        <section class="focus-grid">
+          <article class="focus-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Selected Module</p>
+                <h3 id="selected-title">H1C</h3>
+              </div>
+              <span id="selected-status" class="badge good">paper candidate</span>
+            </div>
+            <p id="selected-summary" class="selected-summary"></p>
+            <div id="stage-rail" class="stage-rail"></div>
+            <div id="metric-gallery" class="metric-gallery"></div>
+          </article>
+
+          <article class="live-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Live Trading</p>
+                <h3>H1C Paper Monitor</h3>
+              </div>
+              <span id="live-market-pill" class="badge">unknown</span>
+            </div>
+            <div class="live-state">
+              <div>
+                <span>State</span>
+                <strong id="metric-state">-</strong>
+              </div>
+              <div>
+                <span>Signal</span>
+                <strong id="live-signal-action">-</strong>
+              </div>
+            </div>
+            <div class="live-radar">
+              <canvas id="signal-readiness-chart" width="460" height="220"></canvas>
+            </div>
+            <div id="live-checks" class="live-checks"></div>
+          </article>
+        </section>
+
+        <section class="story-grid">
+          <article class="story-card">
+            <p class="section-kicker">What Happened</p>
+            <h3 id="story-outcome-title">Outcome</h3>
+            <p id="story-outcome"></p>
+          </article>
+          <article class="story-card">
+            <p class="section-kicker">Evidence</p>
+            <h3 id="story-evidence-title">Canonical Artifacts</h3>
+            <div id="story-evidence" class="evidence-list"></div>
+          </article>
+          <article class="story-card">
+            <p class="section-kicker">Next Gate</p>
+            <h3 id="story-next-title">Next Decision</h3>
+            <p id="story-next"></p>
+          </article>
+        </section>
+
+        <details class="data-drawer">
+          <summary>Operational detail</summary>
+          <div class="metric-grid compact">
+            <div class="metric">
+              <span class="metric-label">Submitted Orders</span>
+              <strong id="metric-submitted">0</strong>
+            </div>
+            <div class="metric" id="metric-card-pnl">
+              <span class="metric-label">Realized PnL</span>
+              <strong id="metric-pnl">$0.00</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">PnL Events</span>
+              <strong id="metric-pnl-events">0</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Auto Runs</span>
+              <strong id="metric-auto-runs">0</strong>
+            </div>
+          </div>
+
+          <div class="detail-grid">
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="section-kicker">Runtime</p>
+                  <h3>Daemon</h3>
+                </div>
+                <span id="daemon-updated">-</span>
+              </div>
+              <dl class="status-list" id="daemon-status"></dl>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="section-kicker">History</p>
+                  <h3>Auto Runs</h3>
+                </div>
+                <span id="auto-run-count-label">0 rows</span>
+              </div>
+              <div id="auto-run-table" class="table-wrap"></div>
+            </section>
+          </div>
+
+          <div class="visual-grid dense">
+            <section class="panel chart-panel">
+              <div class="section-head">
+                <div>
+                  <p class="section-kicker">Market</p>
+                  <h3>QQQ 15m Price</h3>
+                </div>
+                <span id="price-chart-label">0 bars</span>
+              </div>
+              <canvas id="price-chart" width="900" height="260"></canvas>
+            </section>
+
+            <section class="panel chart-panel">
+              <div class="section-head">
+                <div>
+                  <p class="section-kicker">Accounting</p>
+                  <h3>Realized PnL</h3>
+                </div>
+                <span id="pnl-chart-label">0 events</span>
+              </div>
+              <canvas id="pnl-chart" width="900" height="260"></canvas>
+            </section>
+          </div>
+
+          <div class="three-stack">
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="section-kicker">Readiness</p>
+                  <h3>Signal Checklist</h3>
+                </div>
+                <span id="signal-summary-label">0 / 0</span>
+              </div>
+              <div id="signal-condition-table" class="table-wrap"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="section-kicker">Execution</p>
+                  <h3>Submitted Orders</h3>
+                </div>
+                <span id="submitted-count-label">0 rows</span>
+              </div>
+              <div id="submitted-order-table" class="table-wrap"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="section-kicker">State Machine</p>
+                  <h3>State Events</h3>
+                </div>
+                <span id="state-event-count-label">0 rows</span>
+              </div>
+              <div id="state-event-table" class="table-wrap"></div>
+            </section>
+          </div>
+        </details>
+      </section>
+
+      <section id="h8lab" class="view">
+        <section class="h8-console">
+          <article class="panel h8-control-panel">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">H8</p>
+                <h3>Bayesian Regime HMM</h3>
+              </div>
+              <span id="h8-run-state" class="badge info">idle</span>
+            </div>
+            <form id="h8-form" class="h8-form">
+              <label>Ticker<input id="h8-target" name="target_symbol" value="SPY" autocomplete="off" /></label>
+              <label>H8 Config<input id="h8-config" name="config_path" value="configs/hmm_bayesian_regime_h8_spy_15min.yaml" /></label>
+              <label>H8c Config<input id="h8c-config" name="h8c_config_path" value="configs/hmm_bayesian_regime_h8c_qqq_15min.yaml" /></label>
+              <button id="h8-run-button" class="command-button" type="submit">Run H8</button>
+              <button id="h8c-run-button" class="secondary-button" type="button">Run H8c</button>
+            </form>
+            <div id="h8-targets" class="h8-targets"></div>
+          </article>
+
+          <article class="panel h8-summary-panel">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Result</p>
+                <h3 id="h8-result-title">No run</h3>
+              </div>
+              <span id="h8-dataset-label">-</span>
+            </div>
+            <div id="h8-metrics" class="metric-gallery"></div>
+          </article>
+        </section>
+
+        <section class="panel h8-chart-panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Regime Chart</p>
+              <h3 id="h8-chart-title">Probability + price</h3>
+            </div>
+            <span id="h8-chart-label">-</span>
+          </div>
+          <canvas id="h8-regime-chart" width="1200" height="420"></canvas>
+        </section>
+
+        <section class="panel h8-profile-panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">H8c</p>
+              <h3 id="h8c-result-title">Position Probability</h3>
+            </div>
+            <span id="h8c-run-state" class="badge info">idle</span>
+          </div>
+          <div id="h8c-metrics" class="metric-gallery"></div>
+          <div id="h8c-selected-table" class="table-wrap"></div>
+          <div class="subsection-head">
+            <p class="section-kicker">Costs</p>
+            <h4>Selected Gate Sensitivity</h4>
+          </div>
+          <div id="h8c-cost-table" class="table-wrap"></div>
+        </section>
+
+        <section class="h8-grid">
+          <article class="panel">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Validation</p>
+                <h3>Aggregate Gates</h3>
+              </div>
+            </div>
+            <div id="h8-validation-table" class="table-wrap"></div>
+          </article>
+
+          <article class="panel">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Test</p>
+                <h3>Aggregate Gates</h3>
+              </div>
+            </div>
+            <div id="h8-test-table" class="table-wrap"></div>
+          </article>
+        </section>
+
+        <section class="panel h8-profile-panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">States</p>
+              <h3>Validation Profiles</h3>
+            </div>
+          </div>
+          <div id="h8-profile-table" class="table-wrap"></div>
+        </section>
+      </section>
+
+      <section id="candidates" class="view">
+        <div class="section-head page-head">
+          <div>
+            <p class="section-kicker">Research Queue</p>
+            <h3>Candidates</h3>
+          </div>
+          <div class="toolbar">
+            <span id="candidate-count-label">0 rows</span>
+            <input id="candidate-filter" class="filter-input" placeholder="Filter candidate, target, source" />
+          </div>
+        </div>
+        <div id="candidate-table" class="table-wrap table-large"></div>
+      </section>
+
+      <section id="runs" class="view">
+        <div class="section-head page-head">
+          <div>
+            <p class="section-kicker">Registry</p>
+            <h3>Runs</h3>
+          </div>
+          <span id="run-count-label">0 rows</span>
+        </div>
+        <div id="run-table" class="table-wrap table-large"></div>
+      </section>
+
+      <section id="reports" class="view">
+        <div class="split-pane">
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Evidence</p>
+                <h3>Reports</h3>
+              </div>
+              <span id="report-count-label">0 rows</span>
+            </div>
+            <div id="report-table" class="table-wrap"></div>
+          </section>
+
+          <section class="panel report-viewer">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Markdown</p>
+                <h3 id="report-title">Report</h3>
+              </div>
+            </div>
+            <pre id="report-markdown" class="markdown-preview"></pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="decisions" class="view">
+        <div class="split-pane decisions-layout">
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Audit Trail</p>
+                <h3>Decision Log</h3>
+              </div>
+              <span id="decision-count-label">0 rows</span>
+            </div>
+            <div id="decision-table" class="table-wrap"></div>
+          </section>
+
+          <form id="decision-form" class="panel decision-form">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Human Review</p>
+                <h3>New Decision</h3>
+              </div>
+            </div>
+            <label>Type<input name="decision_type" required value="note" /></label>
+            <label>Decision<input name="decision" required /></label>
+            <label>Candidate<input name="candidate_id" /></label>
+            <label>Run<input name="run_id" /></label>
+            <label>Evidence Path<input name="evidence_path" required /></label>
+            <label>Rationale<textarea name="rationale" rows="4"></textarea></label>
+            <label>Next Action<input name="next_action" /></label>
+            <button class="command-button" type="submit">Save Decision</button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js?v=strategy-map-5"></script>
+  </body>
+</html>

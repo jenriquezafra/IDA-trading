@@ -1,0 +1,17 @@
+refresh:
+  target_symbol: QQQ
+  lab_config_path: configs/hmm_lab_15min_expansion_repair.yaml
+  feature_config_path: configs/features/cross_asset_15min_liquid.yaml
+  cboe_config_path: configs/data/cboe_risk_context.yaml
+  symbols: []
+  lookback_days: 10
+  end_date: null
+  download: true
+  clean: true
+  align: true
+  build_features: true
+  refresh_cboe: false
+  keep_incomplete_sessions_for_paper: true
+
+outputs:
+  output_dir: results/paper/data_refresh

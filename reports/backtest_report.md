@@ -12,21 +12,21 @@
 
 | metric | value |
 | --- | ---: |
-| trades | 160 |
-| gross_return | 0.009226 |
-| net_return | -0.006774 |
-| total_cost | 0.016000 |
-| hit_ratio | 0.493750 |
-| avg_trade_net | -0.000042 |
-| max_daily_loss | -0.007465 |
+| trades | 102 |
+| gross_return | 0.000622 |
+| net_return | -0.009578 |
+| total_cost | 0.010200 |
+| hit_ratio | 0.274510 |
+| avg_trade_net | -0.000094 |
+| max_daily_loss | -0.008800 |
 
 ## Exit Reasons
 
 | exit_reason | trades |
 | --- | ---: |
-| time | 96 |
-| stop | 61 |
-| force_flat | 3 |
+| stop | 69 |
+| time | 32 |
+| force_flat | 1 |
 
 ## Notes
 

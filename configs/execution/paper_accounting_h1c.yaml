@@ -1,0 +1,11 @@
+accounting:
+  strategy_id: qqq_15min_risk_off_short_h1c_v1
+  account: DU9782002
+  symbol: QQQ
+  state_config_path: configs/execution/paper_state_h1c.yaml
+  pnl_log_path: results/paper/h1c_state/pnl_events.parquet
+  allow_open_from_position_without_execution: true
+  allow_flatten_without_pending_exit: false
+
+outputs:
+  output_dir: results/paper/h1c_accounting

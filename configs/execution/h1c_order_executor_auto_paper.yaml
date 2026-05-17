@@ -1,0 +1,33 @@
+connection:
+  broker: ibkr
+  gateway: ib_gateway
+  trading_mode: paper
+  host: 127.0.0.1
+  port: 4002
+  client_id: 74
+  timeout_seconds: 10
+  expected_account: "DU9782002"
+
+safety:
+  execution_enabled: true
+  allow_orders: true
+  require_paper_account: true
+  require_paper_port: true
+  require_no_open_trades: true
+  require_market_open: true
+  allow_opg_outside_rth_submission: false
+  require_account_confirmation: false
+  require_fingerprint_confirmation: false
+  require_env_confirmation: false
+  env_confirmation_var: IBKR_H1C_EXECUTION_CONFIRM
+  max_orders: 1
+  max_total_notional_at_avg_cost: 1000000000
+  allowed_sec_types:
+    - STK
+  allowed_order_types:
+    - MKT
+  allowed_tifs:
+    - DAY
+
+outputs:
+  output_dir: results/paper/h1c_order_execution

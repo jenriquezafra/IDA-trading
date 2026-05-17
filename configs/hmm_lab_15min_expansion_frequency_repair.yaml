@@ -1,0 +1,241 @@
+project:
+  name: ida-trading
+  timezone: America/New_York
+  frequency: 15min
+lab:
+  target_symbol: QQQ
+  target_profile: growth_index
+  timeframe: 15min
+  provider: polygon
+  start_date: '2021-05-01'
+  end_date: '2026-05-01'
+  universe_config: configs/universes/core_cross_asset.yaml
+  universe_id: core_cross_asset_v1
+  context_key: context_universe_core
+  benchmark_key: benchmark_universe
+  include_target_in_context: true
+  optional_symbols: []
+polygon:
+  api_key_env: POLYGON_API_KEY
+  source_interval: 5m
+  adjusted: true
+  default_years: 5
+paths:
+  raw_dir: data/raw/polygon
+  cleaned_dir: data/cleaned
+  aligned_dir: data/aligned
+  features_dir: data/features
+  models_dir: models/15min_expansion_frequency_repair
+  results_dir: results/15min_expansion_frequency_repair
+  metadata_dir: data/metadata
+  reports_dir: reports/15min_expansion_frequency_repair
+  data_coverage_dir: reports/15min_expansion_frequency_repair/data_coverage
+  alignment_dir: reports/15min_expansion_frequency_repair/alignment
+session:
+  market_open: 09:30
+  market_close: '16:00'
+  timestamp_label: start
+  regular_session_only: true
+  drop_incomplete_sessions: true
+  expected_bars_per_session: 26
+calendar:
+  enabled: true
+  name: NYSE
+  drop_non_trading_days: true
+  drop_half_days: true
+quality:
+  drop_duplicate_timestamps: true
+  drop_critical_nan_rows: true
+  drop_invalid_price_rows: true
+  drop_negative_volume_rows: true
+  drop_extreme_range_rows: true
+  max_bar_range_bps: 1000.0
+labeling:
+  horizon_bars: 4
+  buffer_bps: 0.5
+  lambda_vol: 0.25
+  round_trip_cost_bps: 1.0
+backtest:
+  no_new_trades_after: '15:45'
+  force_flat_before: '15:55'
+alignment:
+  missing_policy: drop_core_missing
+  core_symbols_required: true
+hmm_lab:
+  feature_set_version: cross_asset_liquid_15min
+  features_config: configs/features/cross_asset_15min_liquid.yaml
+  max_folds: 2
+  walk_forward:
+    train_months: 24
+    validation_months: 6
+    test_months: 6
+    step_months: 6
+candidate_cost_sensitivity_cross_asset:
+  cost_bps:
+  - 1.0
+  - 2.0
+  - 5.0
+  ibkr:
+    enabled: true
+    source_url: https://brokerage.ibkr.com/en/pricing/commissions-stocks.php
+    plans:
+    - tiered
+    - fixed
+    notionals_usd:
+    - 2500
+    - 5000
+    - 10000
+    - 25000
+    - 100000
+    tiered_commission_per_share_usd: 0.0035
+    tiered_min_commission_per_order_usd: 0.35
+    fixed_commission_per_share_usd: 0.005
+    fixed_min_commission_per_order_usd: 1.0
+    max_commission_pct_trade_value: 0.01
+    sec_fee_rate_on_sell: 2.06e-05
+    finra_taf_per_share_on_sell_usd: 0.000195
+    finra_taf_cap_usd: 9.79
+    tiered_clearing_per_share_per_side_usd: 0.0002
+    spread_slippage_bps_round_trip: 1.0
+volatility_expansion_search:
+  candidate_split: validation
+  test_split: test
+  horizons:
+  - 4
+  variants:
+  - compression_breakout
+  - compression_volume
+  sides:
+  - long
+  compression_quantiles:
+  - 0.25
+  - 0.35
+  - 0.45
+  rv_compression_quantiles:
+  - 0.35
+  - 0.45
+  breakout_margin_quantiles:
+  - 0.5
+  - 0.6
+  - 0.7
+  volume_quantiles:
+  - 0.55
+  - 0.65
+  vol_filters:
+  - none
+  - exclude_stress
+  hour_filters:
+  - all
+  - hours_11_13
+  - hours_12_13
+  - exclude_14
+  compression_mode: all
+  min_minutes_from_open: 45
+  min_minutes_to_close: 45
+  max_trades_per_day: 1
+  close_location_long_min: 0.7
+  close_location_short_max: 0.35
+  breadth_low_quantile: 0.35
+  breadth_high_quantile: 0.65
+  credit_low_quantile: 0.35
+  credit_high_quantile: 0.65
+  risk_high_quantile: 0.7
+  vol_high_quantile: 0.7
+  cost_scenarios:
+  - ibkr_tiered_10000
+  - bps_2
+  - bps_5
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+  min_trades: 20
+  min_avg_trade_net: 0.00025
+  max_turnover: 1.5
+  min_profit_factor: 1.15
+  min_daily_sharpe: 0.4
+  max_drawdown: 0.15
+  max_top_day_abs_net_share: 0.35
+  require_random_improvement: true
+  require_inverted_improvement: true
+  require_breakout_improvement: true
+  require_compression_improvement: false
+  max_selected: 150
+  report_top_rows: 120
+volatility_expansion_diagnostics:
+  focus_decisions:
+  - accepted_candidate
+  - cost_fragile
+  - research_candidate
+  - rejected
+  validation_status: volatility_expansion_validation_candidate
+  primary_cost_scenario: ibkr_tiered_10000
+  stress_cost_scenario: bps_5
+  max_candidates: 20
+  report_top_rows: 120
+volatility_expansion_candidate_robustness:
+  candidate_decision: accepted_candidate
+  max_candidates: 3
+  splits:
+  - validation
+  - test
+  test_split: test
+  primary_cost_scenario: ibkr_tiered_10000
+  stress_cost_scenario: bps_5
+  include_ibkr_scenarios: true
+  cost_bps_grid:
+  - 0.0
+  - 1.0
+  - 2.0
+  - 3.0
+  - 4.0
+  - 5.0
+  - 7.5
+  - 10.0
+  bootstrap_samples: 2000
+  bootstrap_seed: 20260503
+  random_control_runs: 500
+  random_seed: 20260503
+  random_control_splits:
+  - test
+  random_control_cost_scenarios:
+  - ibkr_tiered_10000
+  - bps_5
+  min_trades: 20
+  min_breakeven_cost_bps: 6.0
+  min_positive_month_rate: 0.5
+  min_bootstrap_primary_prob_positive: 0.75
+  min_bootstrap_stress_prob_positive: 0.55
+  max_random_beats_alpha_rate: 0.10
+  report_top_rows: 120
+volatility_expansion_holdout:
+  candidate_decision: accepted_candidate
+  max_candidates: 3
+  horizons:
+  - 4
+  primary_cost_scenario: ibkr_tiered_10000
+  stress_cost_scenario: bps_5
+  include_ibkr_scenarios: true
+  cost_bps_grid:
+  - 0.0
+  - 1.0
+  - 2.0
+  - 3.0
+  - 4.0
+  - 5.0
+  - 7.5
+  - 10.0
+  bootstrap_samples: 2000
+  bootstrap_seed: 20260503
+  random_control_runs: 500
+  random_seed: 20260503
+  random_control_cost_scenarios:
+  - ibkr_tiered_10000
+  - bps_5
+  min_trades: 30
+  min_avg_trade_net: 0.00015
+  min_breakeven_cost_bps: 6.0
+  min_positive_month_rate: 0.5
+  min_bootstrap_primary_prob_positive: 0.75
+  min_bootstrap_stress_prob_positive: 0.55
+  max_random_beats_alpha_rate: 0.10
+  report_top_rows: 120

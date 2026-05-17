@@ -1,0 +1,540 @@
+strategy_id: equity_earnings_continuation_h3_v1
+hypothesis_id: H3
+description: >
+  Earnings continuation intraday for liquid US equities. The strategy buys
+  positive pre-market/after-market earnings reactions after the first 30
+  regular-session minutes and exits at the same-session close. Screening is
+  blocked until earnings timestamps and consensus snapshots are verified
+  point-in-time.
+
+status: contract_registered
+timeframe: 5min
+entry_rule: after_open_minutes
+
+data:
+  earnings_calendar_provider: polygon_benzinga_earnings
+  earnings_calendar_audit_status: confirmed_source_pending_sample
+  earnings_calendar_endpoint: /benzinga/v1/earnings
+  earnings_calendar_entitlement_required: true
+  earnings_calendar_purchase_required: true
+  earnings_calendar_purchase_blocking_for_real_dataset: true
+  earnings_calendar_public_price_observed_2026_05_15: 99_usd_per_month_individual
+  earnings_calendar_docs:
+    - https://polygon.io/docs/rest/partners/benzinga/earnings
+    - https://docs.benzinga.com/api-reference/calendar_api/earnings/returns-the-earnings-data
+    - https://www.benzinga.com/apis/cloud-product/corporate-earnings/
+  consensus_provider: polygon_benzinga_earnings
+  consensus_audit_status: confirmed_source_pending_snapshot_audit
+  consensus_fields:
+    eps_consensus:
+      polygon_massive: estimated_eps
+      benzinga_direct: eps_est
+    revenue_consensus:
+      polygon_massive: estimated_revenue
+      benzinga_direct: revenue_est
+    consensus_updated_at:
+      polygon_massive: last_updated
+      benzinga_direct: updated
+  consensus_snapshot_audit_required: true
+  consensus_revision_policy:
+    rule: hard_reject_without_pre_event_snapshot
+    require_snapshot_at_or_before_report_timestamp: true
+    reject_post_event_revised_consensus_without_prior_snapshot: true
+    reject_vendor_surprise_without_recomputable_inputs: true
+    require_raw_payload_or_record_hash: true
+    eps_consensus_missing_policy: exclude_event
+    revenue_consensus_missing_policy: exclude_event
+  guidance_provider: polygon_benzinga_guidance
+  guidance_audit_status: source_exists_deferred_v1
+  guidance_endpoint: /benzinga/v1/guidance
+  guidance_docs:
+    - https://polygon.io/docs/rest/partners/benzinga/corporate-guidance
+    - https://docs.benzinga.com/api-reference/calendar-api/get-guidance
+    - https://docs.benzinga.com/api-reference/guides/guidance-process-explained
+    - https://www.benzinga.com/apis/cloud-product/corporate-guidance/
+  guidance_policy: excluded_v1_candidate_v2
+  intraday_provider: polygon_massive_stocks
+  intraday_audit_status: confirmed_source_pending_coverage_audit
+  intraday_primary_access: flat_files
+  intraday_primary_dataset: us_stocks_sip/minute_aggs_v1
+  intraday_sample_access: rest_custom_bars
+  intraday_sample_endpoint: /v2/aggs/ticker/{stocksTicker}/range/{multiplier}/{timespan}/{from}/{to}
+  intraday_docs:
+    - https://polygon.io/docs/rest/stocks/aggregates/custom-bars
+    - https://polygon.io/docs/flat-files/stocks/overview
+    - https://polygon.io/docs/flat-files/stocks/minute-aggregates/2023
+  intraday_raw_timeframe: 1min
+  intraday_derived_timeframe: 5min
+  intraday_min_entitlement: all_history_or_business_equivalent
+  quotes_provider: polygon_massive_stocks
+  quotes_audit_status: confirmed_proxy_with_quote_audit
+  quotes_primary_access: flat_files
+  quotes_primary_dataset: us_stocks_sip/quotes_v1
+  quotes_sample_access: rest_nbbo_quotes
+  quotes_docs:
+    - https://polygon.io/docs/rest/stocks/quotes
+    - https://polygon.io/docs/flat-files/stocks/quotes/2023
+    - https://polygon.io/docs/flat-files/stocks/overview
+  quote_proxy_policy: conservative_bps_until_sample_audit
+  market_calendar_provider: pandas_market_calendars_xnys
+  market_calendar_audit_status: rules_registered_pending_sample_audit
+  market_calendar_crosscheck_docs:
+    - https://polygon.io/docs/rest/stocks/market-operations/market-status
+    - https://polygon.io/docs/rest/stocks/market-operations/market-holidays
+  halt_provider: nasdaq_trader
+  halt_audit_status: rules_registered_pending_sample_audit
+  halt_docs:
+    - https://nasdaqtrader.com/trader.aspx?id=TradingHaltHistory
+    - https://www.nasdaqtrader.com/Trader.aspx?id=TradeHaltCodes
+  corporate_actions_provider: polygon_massive_reference_actions
+  corporate_actions_audit_status: rules_registered_pending_sample_audit
+  splits_endpoint: /v3/reference/splits
+  dividends_endpoint: /v3/reference/dividends
+  ticker_events_endpoint: /vX/reference/tickers/{id}/events
+  corporate_actions_docs:
+    - https://polygon.io/docs/rest/stocks/corporate-actions/splits
+    - https://polygon.io/docs/rest/stocks/corporate-actions/dividends
+    - https://polygon.io/docs/rest/stocks/corporate-actions/ticker-events
+  sector_mapping_provider: h3_static_seed_with_polygon_sic_historical_audit
+  sector_mapping_status: static_seed_pending_historical_audit
+  sector_mapping_path: configs/strategy/equity_earnings_continuation_h3_sector_map_v1.yaml
+  sector_mapping_docs:
+    - https://massive.com/docs/rest/stocks/tickers/ticker-overview
+    - https://www.sec.gov/search-filings/standard-industrial-classification-sic-code-list
+  peer_proxy_provider: sector_etf_proxy_v1
+  peer_proxy_status: sector_etf_proxy_ok_for_screening_pending_coverage_audit
+  peer_proxy_path: configs/strategy/equity_earnings_continuation_h3_peer_proxy_v1.yaml
+  timestamp_timezone: America/New_York
+  storage_timezone: UTC
+  calendar: XNYS
+  regular_session: "09:30-16:00"
+  exclude_half_days: true
+  timezone_session_policy:
+    require_utc_and_et_timestamps: true
+    reject_naive_timestamps: true
+    entry_exit_calendar_filter_status: implemented_calendar_level_pending_intraday_bar_audit
+    session_label_timezone: America/New_York
+    regular_open: "09:30"
+    regular_close: "16:00"
+    entry_time: "10:00"
+    latest_allowed_entry_time: "10:05"
+    expected_1m_bars: 390
+    expected_5m_bars: 78
+    dst_sample_audit_required: true
+  halt_policy:
+    exclude_official_halts: true
+    exclude_suspected_bad_sessions: true
+    entry_window: "09:30-10:05"
+    exit_window: regular_close
+  corporate_actions_policy:
+    split_adjustment_required: true
+    exclude_unreconciled_splits: true
+    flag_special_cash_dividends: true
+    exclude_unstable_ticker_identity: true
+  exclusion_feature_policy:
+    macro_calendar_path: data/events/macro/h3_v1/macro_exclusion_sessions.parquet
+    halt_events_path: data/events/halts/h3_v1/halt_events.parquet
+    quote_quality_path: data/events/quality/h3_v1/quote_spread_30m.parquet
+    binary_news_path: data/events/news/h3_v1/binary_news_events.parquet
+    high_spread_threshold_bps: 10.0
+    simultaneous_peer_scope: same_sector_same_event_session
+    missing_optional_exclusion_tables_policy: allow_development_block_screening
+  intraday_panel_path: data/aligned/equities/5min/h3_v1/panel.parquet
+  intraday_raw_dir: data/raw/polygon/equities/1min/h3_v1
+  intraday_derived_dir: data/aligned/equities/5min/h3_v1
+  earnings_raw_payload_path: data/raw/polygon/benzinga/earnings/h3_v1/earnings_raw.json
+  earnings_events_path: data/events/earnings/h3_v1/earnings_events.parquet
+  earnings_events_timing_partitions:
+    pre_market: data/events/earnings/h3_v1/earnings_events_pre_market.parquet
+    after_market: data/events/earnings/h3_v1/earnings_events_after_market.parquet
+    excluded_timing: data/events/earnings/h3_v1/earnings_events_excluded_timing.parquet
+  point_in_time_requirements:
+    report_timestamp_real: true
+    sample_payload_audit_before_screening: true
+    intraday_coverage_audit_before_screening: true
+    quote_or_proxy_sample_audit_before_screening: true
+    peer_proxy_coverage_audit_before_screening: true
+    timezone_session_halt_ca_audit_before_screening: true
+    historical_sector_mapping_audit_before_promotion: true
+    eps_consensus_snapshot_before_event: true
+    revenue_consensus_snapshot_before_event: true
+    adjusted_intraday_prices: true
+    no_post_event_consensus_revisions: true
+    reject_revised_post_event_consensus_without_snapshot: true
+
+universe:
+  mode: fixed_liquid_us_seed_with_event_date_filters
+  as_of_contract: "2026-05-15"
+  research_period:
+    start_date: "2016-01-01"
+    end_date: "2025-12-31"
+    extension_policy: require_new_contract_or_revision_manifest
+  tickers:
+    - AAPL
+    - ABBV
+    - ABT
+    - ADBE
+    - AMD
+    - AMGN
+    - AMT
+    - AMZN
+    - APD
+    - AVGO
+    - AXP
+    - BA
+    - BAC
+    - BKNG
+    - BLK
+    - C
+    - CAT
+    - CI
+    - CL
+    - CMCSA
+    - COF
+    - COP
+    - COST
+    - CRM
+    - CSCO
+    - CVS
+    - CVX
+    - DE
+    - DHR
+    - DIS
+    - DUK
+    - ELV
+    - ETN
+    - FCX
+    - GE
+    - GOOGL
+    - GS
+    - HD
+    - HON
+    - IBM
+    - INTC
+    - ISRG
+    - JNJ
+    - JPM
+    - KO
+    - LIN
+    - LLY
+    - LMT
+    - LOW
+    - MA
+    - MAR
+    - MCD
+    - MDT
+    - META
+    - MDLZ
+    - MRK
+    - MS
+    - MSFT
+    - MU
+    - NEE
+    - NFLX
+    - NKE
+    - NOW
+    - NVDA
+    - ORCL
+    - PANW
+    - PEP
+    - PFE
+    - PG
+    - PLD
+    - PM
+    - QCOM
+    - RTX
+    - SBUX
+    - SCHW
+    - SLB
+    - SO
+    - T
+    - TGT
+    - TJX
+    - TMUS
+    - TMO
+    - TSLA
+    - TXN
+    - UNH
+    - UNP
+    - UPS
+    - V
+    - VZ
+    - WFC
+    - WMT
+    - XOM
+  eligibility:
+    min_market_cap_usd: 20000000000
+    min_median_dollar_volume_20d_usd: 100000000
+    min_price_usd: 10.0
+    min_regular_session_coverage_pct: 0.98
+    require_earnings_timestamp: true
+    require_eps_consensus: true
+    require_revenue_consensus: true
+    require_pre_event_consensus_snapshot: true
+  exclusions:
+    security_types:
+      - adr
+      - etf
+      - fund
+      - preferred
+      - duplicate_share_class
+    event_flags:
+      - m_and_a
+      - fda_binary
+      - fraud_or_litigation
+      - trading_halt
+      - bad_corporate_action_adjustment
+      - unreconciled_split
+      - unstable_ticker_identity
+      - high_spread
+      - binary_news_event
+      - missing_pre_event_eps_consensus_snapshot
+      - missing_pre_event_revenue_consensus_snapshot
+      - post_event_revised_consensus_without_snapshot
+      - macro_dominant_session
+      - simultaneous_core_peer_earnings
+
+events:
+  allowed_report_timings:
+    - pre_market
+    - after_market
+  excluded_report_timings:
+    - during_session
+    - unknown_time
+  report_time_rules:
+    pre_market:
+      definition: report_timestamp_et < "09:30"
+      event_session: same_xnys_session
+      entry_session: event_session
+    after_market:
+      definition: report_timestamp_et >= "16:00"
+      event_session: next_xnys_session
+      entry_session: event_session
+    during_session:
+      definition: report_timestamp_et_between_09_30_and_16_00
+      policy: exclude_v1
+    unknown_time:
+      policy: exclude_v1
+  entry:
+    opening_window_minutes: 30
+    entry_time: "10:00"
+    entry_price: next_bar_open_at_or_after_entry_time
+    latest_allowed_entry_time: "10:05"
+  exit:
+    primary_exit: same_session_close
+    primary_exit_time: "16:00"
+    secondary_exits:
+      - t_plus_1_open
+      - t_plus_1_10_30
+      - t_plus_1_close
+
+features:
+  fundamental:
+    surprise_zscore:
+      method: expanding_prior_universe_sessions
+      basis: actual_minus_pre_event_consensus_over_abs_consensus
+      min_history: 20
+      eps_consensus_abs_floor: 0.01
+      revenue_consensus_abs_floor: 1.0
+      same_session_events_excluded_from_fit: true
+      future_events_excluded_from_fit: true
+    eps_surprise_z:
+      source: actual_vs_pre_event_consensus
+      fit_on: prior_event_sessions_only
+    revenue_surprise_z:
+      source: actual_vs_pre_event_consensus
+      fit_on: prior_event_sessions_only
+    guidance:
+      policy: excluded_v1_candidate_v2
+      source_candidate: polygon_benzinga_guidance
+      reason: keep_h3_v1_screening_on_eps_revenue_gap_volume_sector_confirmation
+  opening_reaction:
+    gap_atr:
+      formula: event_session_open_gap_div_recent_atr
+      atr_lookback_sessions: 20
+      atr_min_history_sessions: 20
+      gap_return_formula: event_session_open_div_previous_regular_close_minus_1
+      atr_return_formula: daily_true_range_div_reference_close
+      fit_on: prior_symbol_sessions_only
+    rel_volume_30m:
+      formula: first_30m_volume_div_ticker_time_of_day_median
+      expected_volume_formula: rolling_prior_symbol_sessions_median
+      fit_on: prior_symbol_sessions_only
+      lookback_sessions: 60
+      min_history_sessions: 20
+      opening_window_minutes: 30
+      expected_5m_bars: 6
+    vwap_30m:
+      source: first_30_regular_minutes
+      formula: volume_weighted_bar_vwap_or_close_proxy
+      preferred_bar_field: bar_vwap
+      fallback_bar_field: close
+      expected_5m_bars: 6
+      missing_policy: exclude_event
+    range_30m:
+      source: first_30_regular_minutes
+      fields:
+        high: range_high_30m
+        low: range_low_30m
+        close: close_30m
+      expected_5m_bars: 6
+      missing_policy: exclude_event
+  confirmation:
+    peer_proxy:
+      policy: sector_etf_proxy_v1
+      config_path: configs/strategy/equity_earnings_continuation_h3_peer_proxy_v1.yaml
+      fallback: SPY
+      firm_level_peer_baskets: deferred_v2
+    sector_proxy:
+      mapping_path: configs/strategy/equity_earnings_continuation_h3_sector_map_v1.yaml
+      fallback: SPY
+      sector_etfs:
+        communication_services: XLC
+        consumer_discretionary: XLY
+        consumer_staples: XLP
+        energy: XLE
+        financials: XLF
+        healthcare: XLV
+        industrials: XLI
+        materials: XLB
+        real_estate: XLRE
+        technology: XLK
+        utilities: XLU
+    sector_return_30m:
+      source: sector_etf_peer_proxy_first_30m_return
+      return_formula: first_30m_close_div_first_30m_open_minus_1
+      fallback: SPY_if_sector_etf_missing
+      missing_policy: exclude_if_no_sector_mapping_or_no_proxy_return
+    peer_proxy_return_30m:
+      source: sector_etf_peer_proxy_first_30m_return
+      return_formula: first_30m_close_div_first_30m_open_minus_1
+      fallback: SPY_if_sector_etf_missing
+      missing_policy: exclude_if_no_sector_mapping_or_no_proxy_return
+
+signal:
+  side: long_only
+  filters:
+    - field: eps_surprise_z
+      operator: ">"
+      value: 0.0
+      fitted_on: fixed_rule
+    - field: revenue_surprise_z
+      operator: ">="
+      value: 0.0
+      fitted_on: fixed_rule
+    - field: gap_atr
+      operator: between
+      min_value: 0.25
+      max_value: 2.50
+      fitted_on: fixed_rule
+    - field: rel_volume_30m
+      operator: ">="
+      fit_on: train_fold
+      quantile: 0.60
+    - field: close_30m
+      operator: ">="
+      field_value: vwap_30m
+      fitted_on: fixed_rule
+    - field: sector_return_30m
+      operator: ">="
+      value: -0.001
+      fitted_on: fixed_rule
+    - field: exclusion_flags
+      operator: "=="
+      value: none
+      fitted_on: fixed_rule
+
+position:
+  type: single_name_equity
+  side: long_only
+  sizing: fixed_notional
+  gross_exposure: 1.0
+  max_positions_per_session: 10
+  max_symbol_weight_per_session: 0.20
+  hedge:
+    enabled: false
+    residual_measurement_only: true
+
+costs:
+  source: proxy_conservative_bps_until_quote_sample_audit
+  round_trip_bps:
+    base: 5.0
+    conservative: 10.0
+    stress: 20.0
+  components:
+    commission_bps_round_trip: included_in_proxy
+    spread_bps_round_trip: included_in_proxy
+    slippage_bps_round_trip: included_in_proxy
+    impact_bps_round_trip: included_in_proxy
+  quote_calibration:
+    source: polygon_massive_stocks_quotes
+    sample_tickers: [AAPL, MSFT, NVDA, JPM, XOM]
+    event_sample_min_count: 20
+    entry_window: around_10_00_et
+    exit_window: around_regular_close
+    raise_conservative_cost_if_p90_exceeds_bps: 10.0
+  delay_sensitivity_minutes:
+    - 5
+    - 15
+    - 30
+
+controls:
+  earnings_beat_only: true
+  gap_only: true
+  intraday_momentum_no_event: true
+  random_same_frequency_by_ticker: true
+  same_hour_by_ticker: true
+  sector_proxy_equivalent: true
+  random_seed: 3003
+
+split_policy:
+  train_months: 36
+  validation_months: 6
+  test_months: 6
+  step_months: 6
+  embargo_sessions: 1
+  threshold_fit_split: train
+  selection_split: validation
+  confirmation_split: test
+
+outputs:
+  output_dir: results/strategy/equity_earnings_continuation/5min
+  screening_output_dir: results/strategy/equity_earnings_continuation/5min/phase3_screening
+  strategy_output_dir: results/strategy/equity_earnings_continuation/5min/h3_v1
+  artifacts:
+    manifest: manifest.yaml
+    data_audit: data_audit.md
+    coverage: coverage.parquet
+    earnings_events: earnings_events.parquet
+    earnings_events_pre_market: earnings_events_pre_market.parquet
+    earnings_events_after_market: earnings_events_after_market.parquet
+    earnings_events_excluded_timing: earnings_events_excluded_timing.parquet
+    events: events.parquet
+    trades: trades.parquet
+    daily: daily.parquet
+    monthly: monthly.parquet
+    summary: summary.parquet
+    distribution: distribution.parquet
+    thresholds: thresholds.parquet
+    report: report.md
+
+promotion_gates:
+  min_validation_trades: 200
+  min_test_trades: 100
+  validation_net_return_conservative_gt: 0.0
+  test_net_return_conservative_gt: 0.0
+  avg_trade_net_stress_bps_gt: 0.0
+  hit_rate_bootstrap_diff_vs_random_lower_ci_gt: 0.0
+  hit_rate_bootstrap_diff_vs_same_hour_lower_ci_gt: 0.0
+  max_top5_abs_pnl_share: 0.50
+  min_active_sectors: 4
+  max_sector_pnl_share: 0.50
+  max_symbol_pnl_share: 0.25
+  must_beat_controls:
+    - gap_only
+    - earnings_beat_only
+    - sector_proxy_equivalent
+  robustness:
+    doubled_costs_net_positive: true
+    entry_delay_15m_net_positive: true
+    validation_selects_test_confirms_once: true

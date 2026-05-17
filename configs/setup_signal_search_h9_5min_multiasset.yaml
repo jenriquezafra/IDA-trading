@@ -1,0 +1,109 @@
+project:
+  name: ida-trading
+  timezone: America/New_York
+  frequency: 5min
+lab:
+  target_symbol: SPY
+  timeframe: 5min
+  universe_id: core_cross_asset_v1
+paths:
+  features_dir: data/features
+  results_dir: results/h9_setup_first/spy_qqq_ko_amd_googl_5min_24_6_6_step3
+  reports_dir: reports/h9_setup_first/spy_qqq_ko_amd_googl_5min_24_6_6_step3
+hmm_lab:
+  feature_set_version: cross_asset_v1
+  features_config: configs/features/cross_asset_v1.yaml
+  max_folds: 9
+  walk_forward:
+    train_months: 24
+    validation_months: 6
+    test_months: 6
+    step_months: 3
+setup_signal_search:
+  horizons: [12, 24]
+  families:
+    - opening_range_breakout
+    - opening_bias_followthrough
+    - gap_fill
+    - vwap_stretch_reversal
+    - breakdown_short_risk_off
+  rel_volume_quantiles: [0.33, 0.50, 0.67, 0.75]
+  wick_quantiles: [0.60, 0.75]
+  range_ratio_quantiles: [0.33, 0.50]
+  close_location_thresholds: [0.45, 0.55, 0.65, 0.70]
+  vwap_abs_mins: [0.0, 0.25, 0.50]
+  opening_bias_followthrough:
+    enabled: true
+    directions: [long, short]
+    rel_volume_quantiles: [0.33, 0.50, 0.67]
+    close_location_thresholds: [0.45, 0.55, 0.65]
+    vwap_floors: [-0.25, 0.0]
+    vwap_ceilings: [0.75, 1.25]
+    dist_open_mins: [0.0]
+    filter_sets:
+      - name: bias60_basic
+        bias_attempts_min: 1
+        min_minutes_from_open: 60
+        min_minutes_to_close: 45
+      - name: bias60_breadth
+        bias_attempts_min: 1
+        positive_index_min: 2
+        positive_sector_min: 4
+        min_minutes_from_open: 60
+        min_minutes_to_close: 45
+      - name: bias60_vwap_breadth
+        bias_attempts_min: 1
+        index_above_vwap_min: 3
+        sector_above_vwap_min: 5
+        min_minutes_from_open: 60
+        min_minutes_to_close: 45
+      - name: bias60_accel
+        bias_attempts_min: 1
+        rel_volume_accel_q: 0.50
+        positive_index_min: 2
+        positive_sector_min: 4
+        min_minutes_from_open: 60
+        min_minutes_to_close: 45
+  gap_low_quantile: 0.25
+  gap_high_quantile: 0.75
+  gap_fill_progress_mins: [0.20, 0.50]
+  risk_off_quantiles: [0.60, 0.75]
+  breadth_low_quantile: 0.33
+  cost_scenarios: [ibkr_tiered_10000, bps_2, bps_5]
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+  min_trades: 30
+  min_profit_factor: 1.05
+  min_daily_sharpe: 0.30
+  max_drawdown: 0.40
+  max_top_day_abs_net_share: 0.30
+  max_top_month_abs_net_share: 0.50
+  require_base_segment_improvement: true
+  max_selected: 220
+  report_top_rows: 80
+setup_signal_multiasset:
+  targets: [SPY, QQQ, KO, AMD, GOOGL]
+  results_dir: results/h9_setup_first/spy_qqq_ko_amd_googl_5min_24_6_6_step3/_multiasset
+  reports_dir: reports/h9_setup_first/spy_qqq_ko_amd_googl_5min_24_6_6_step3/_multiasset
+  min_targets: 3
+  min_research_targets: 3
+  min_primary_positive_targets: 3
+  min_stress_nonnegative_targets: 2
+  report_top_rows: 80
+candidate_cost_sensitivity_cross_asset:
+  cost_bps: [1.0, 2.0, 5.0]
+  ibkr:
+    enabled: true
+    plans: [tiered, fixed]
+    notionals_usd: [5000, 10000, 25000]
+    spread_slippage_bps_round_trip: 1.5
+    tiered_commission_per_share_usd: 0.0035
+    tiered_min_commission_per_order_usd: 0.35
+    tiered_clearing_per_share_per_side_usd: 0.0002
+    fixed_commission_per_share_usd: 0.005
+    fixed_min_commission_per_order_usd: 1.0
+    max_commission_pct_trade_value: 0.01
+    sec_fee_rate_on_sell: 0.0000206
+    finra_taf_per_share_on_sell_usd: 0.000195
+    finra_taf_cap_usd: 9.79

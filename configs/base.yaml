@@ -12,11 +12,19 @@ paths:
   reports: reports
 
 data:
-  provider: yfinance
+  provider: polygon
   symbol: SPY
+  start_date: "2021-05-01"
+  end_date:
   download_period: 60d
   download_interval: 5m
   input_file: data/raw/spy_5min.parquet
+  polygon:
+    api_key_env: POLYGON_API_KEY
+    source_interval: 1m
+    raw_source_file: data/raw/spy_1min.parquet
+    adjusted: true
+    default_years: 5
   cleaned_file: data/cleaned/spy_5min_clean.parquet
   quality_report_file: reports/data_quality.md
   features_file: data/features/features_base.parquet
@@ -59,6 +67,9 @@ features:
   atr_windows: [6, 12]
   sma_windows: [6, 12, 24]
   trend_windows: [6, 12, 24]
+  efficiency_windows: [12]
+  location_atr_column: atr_12
+  vwap_slope_window: 12
   open_window_bars: 6
   close_window_bars: 6
   midday_start: "12:00"
@@ -90,6 +101,79 @@ hmm:
     - trend_12
     - intraday_drawdown
 
+hmm_feature_lab:
+  output_dir: reports/hmm_feature_lab
+  report_file: reports/hmm_feature_lab.md
+  max_folds: 12
+  horizons: [2, 6]
+  cost_bps: [1.0, 2.0]
+  n_states: 4
+  n_iter: 100
+  feature_sets:
+    - name: current_default
+      columns: [ret_1, ret_3, rv_6, rv_12, range, rel_volume, trend_12, intraday_drawdown]
+    - name: volatility_liquidity
+      columns: [rv_3, rv_6, rv_12, rv_24, range, atr_6, atr_12, rel_volume]
+    - name: trend_structure
+      columns: [ret_1, ret_3, ret_6, trend_6, trend_12, trend_24, intraday_drawdown]
+    - name: vwap_reversion
+      columns: [ret_1, ret_3, dist_vwap, intraday_drawdown, range, rel_volume]
+    - name: time_volatility
+      columns: [sin_time, cos_time, minutes_to_close, open_window, close_window, rv_6, rv_12, rel_volume]
+    - name: minimal_interpretable
+      columns: [rv_12, range, rel_volume, trend_12, dist_vwap]
+    - name: minimal_trend_efficiency
+      columns: [ret_3, trend_12, signed_efficiency_12, dir_persistence_12, rv_12]
+    - name: minimal_vwap_location
+      columns: [dist_vwap_atr, dist_open, pos_session_range, intraday_drawdown, rv_12, rel_volume]
+    - name: minimal_compression_expansion
+      columns: [vol_ratio_6_24, range_ratio_6_24, signed_efficiency_12, pos_session_range, rv_12, range]
+    - name: ablation_price_structure_only
+      columns: [ret_3, rv_12, vol_ratio_6_24, signed_efficiency_12, dist_vwap_atr, pos_session_range, intraday_drawdown]
+    - name: rich_trend_vwap_structure
+      columns: [ret_3, ret_6, trend_12, trend_24, signed_efficiency_12, dir_persistence_12, dist_vwap_atr, vwap_slope_12, pos_session_range]
+    - name: rich_extreme_reversion
+      columns: [dist_session_high_atr, dist_session_low_atr, pos_session_range, intraday_drawdown, intraday_runup, dist_vwap_atr, rv_12, ret_3, rel_volume]
+
+hmm_stability:
+  output_dir: reports/hmm_stability
+  report_file: reports/hmm_stability.md
+  max_folds: 12
+  horizons: [6]
+  cost_bps: [1.0, 2.0]
+  n_states: [3, 4, 5]
+  seeds: [42, 7, 123]
+  n_iter: 100
+  feature_sets:
+    - name: rich_extreme_reversion
+      columns: [dist_session_high_atr, dist_session_low_atr, pos_session_range, intraday_drawdown, intraday_runup, dist_vwap_atr, rv_12, ret_3, rel_volume]
+    - name: minimal_vwap_location
+      columns: [dist_vwap_atr, dist_open, pos_session_range, intraday_drawdown, rv_12, rel_volume]
+
+hmm_candidate_diagnostics:
+  output_dir: reports/hmm_candidate_diagnostics
+  report_file: reports/hmm_candidate_diagnostics.md
+  candidate_source: reports/hmm_stability/stability_holdout.parquet
+  feature_sets_to_inspect: [rich_extreme_reversion]
+  split: test
+  candidate_status: candidate
+  cost_bps: [1.0]
+  max_folds: 12
+  n_iter: 100
+
+hmm_candidate_thresholds:
+  output_dir: reports/hmm_candidate_thresholds
+  report_file: reports/hmm_candidate_thresholds.md
+  candidate_source: reports/hmm_stability/stability_holdout.parquet
+  feature_sets_to_inspect: [rich_extreme_reversion, minimal_vwap_location]
+  split: test
+  candidate_status: candidate
+  source_cost_bps: [1.0]
+  threshold_multipliers: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]
+  cost_bps: [0.5, 1.0, 1.5, 2.0]
+  max_folds: 12
+  n_iter: 100
+
 model:
   baseline: logistic_regression
   challenger: xgboost
@@ -110,6 +194,21 @@ model:
   base_report_file: reports/predictive_base_report.md
   hmm_predictions_file: data/features/predictive_hmm_predictions.parquet
   hmm_report_file: reports/predictive_hmm_report.md
+  xgboost_predictions_file: data/features/predictive_xgboost_predictions.parquet
+  xgboost_report_file: reports/predictive_xgboost_report.md
+  xgboost:
+    n_estimators: 250
+    max_depth: 3
+    learning_rate: 0.03
+    min_child_weight: 25.0
+    subsample: 0.80
+    colsample_bytree: 0.80
+    reg_alpha: 0.10
+    reg_lambda: 5.00
+    objective: multi:softprob
+    eval_metric: mlogloss
+    tree_method: hist
+    n_jobs: 4
   hmm_feature_columns:
     - hmm_p0
     - hmm_p1
@@ -230,3 +329,21 @@ walkforward:
 evaluation:
   report_file: reports/walkforward_summary.md
   metrics_file: reports/evaluation_metrics.parquet
+
+robustness:
+  output_dir: reports/robustness
+  report_file: reports/robustness.md
+  horizons: [1, 2, 3]
+  hmm_states: [2, 3, 4, 5, 6]
+  cost_bps: [1.0, 2.0, 5.0]
+  theta_prob_grid: [0.45, 0.50, 0.55, 0.60]
+  theta_score_grid: [0.00, 0.05, 0.10, 0.15]
+  max_neutral_grid: [0.55, 0.65, 0.75]
+  max_hmm_entropy_grid: [0.50, 0.70, 0.90, 1.00]
+  train_months: [3, 5, 9]
+  seeds: [42, 7, 123]
+  periods: ["all"]
+
+ablation:
+  output_dir: reports/ablation
+  report_file: reports/ablation.md

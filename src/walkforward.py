@@ -19,7 +19,8 @@ from src.predictive_model import (
     predict_probabilities,
     prepare_model_frame,
 )
-from src.signal import apply_selected_signal, select_thresholds_on_validation
+from src.predictive_xgboost import calibrate_xgboost_model, fit_xgboost_model, predict_xgboost_probabilities
+from src.signal import apply_selected_signal, build_signal_frame, select_thresholds_on_validation
 
 
 @dataclass(frozen=True)
@@ -149,6 +150,66 @@ def _net_return_from_predictions(predictions: pd.DataFrame, config: dict[str, An
     }
 
 
+def _run_xgboost_challenger(
+    split_frames: dict[str, pd.DataFrame],
+    config: dict[str, Any],
+    fold_dir: Path,
+) -> dict[str, Any]:
+    feature_columns = get_base_feature_columns(config)
+    model_frame = pd.concat(
+        [
+            split_frames["train"].assign(split="train"),
+            split_frames["validation"].assign(split="validation"),
+            split_frames["test"].assign(split="test"),
+        ],
+        ignore_index=True,
+    )
+    model_frame = prepare_model_frame(model_frame, feature_columns)
+    train = model_frame[model_frame["split"] == "train"].copy()
+    validation = model_frame[model_frame["split"] == "validation"].copy()
+    test = model_frame[model_frame["split"] == "test"].copy()
+
+    model = fit_xgboost_model(train, feature_columns, config)
+    calibrator = calibrate_xgboost_model(model, validation, feature_columns, config)
+    predictions = pd.concat(
+        [
+            predict_xgboost_probabilities(model, train, feature_columns).assign(split="train", calibrated=False),
+            predict_xgboost_probabilities(calibrator, validation, feature_columns).assign(split="validation", calibrated=True),
+            predict_xgboost_probabilities(calibrator, test, feature_columns).assign(split="test", calibrated=True),
+        ],
+        ignore_index=True,
+    )
+    signal_frame = build_signal_frame(predictions)
+    selected, grid = select_thresholds_on_validation(signal_frame, config)
+    signals = apply_selected_signal(signal_frame, selected, config)
+    metrics = pd.DataFrame(
+        [
+            evaluate_probabilities(predictions[predictions["split"] == "train"], "train_uncalibrated"),
+            evaluate_probabilities(predictions[predictions["split"] == "validation"], "validation_calibrated"),
+            evaluate_probabilities(predictions[predictions["split"] == "test"], "test_calibrated"),
+        ]
+    )
+    test_signal_metrics = _net_return_from_predictions(signals[signals["split"] == "test"], config)
+
+    predictions.to_parquet(fold_dir / "xgboost_predictions.parquet", index=False)
+    signals.to_parquet(fold_dir / "xgboost_signals.parquet", index=False)
+    grid.to_parquet(fold_dir / "xgboost_threshold_grid.parquet", index=False)
+    metrics.to_parquet(fold_dir / "xgboost_metrics.parquet", index=False)
+    joblib.dump(model, fold_dir / "xgboost_model.joblib")
+    joblib.dump(calibrator, fold_dir / "xgboost_calibrator.joblib")
+
+    test_metrics = metrics[metrics["split"] == "test_calibrated"].iloc[0].to_dict()
+    return {
+        "xgboost_theta_prob": selected["theta_prob"],
+        "xgboost_theta_score": selected["theta_score"],
+        "xgboost_max_neutral": selected["max_neutral"],
+        "xgboost_max_hmm_entropy": selected["max_hmm_entropy"],
+        "xgboost_test_accuracy": float(test_metrics["accuracy"]),
+        "xgboost_test_log_loss": float(test_metrics["log_loss"]),
+        **{f"xgboost_test_signal_{key}": value for key, value in test_signal_metrics.items()},
+    }
+
+
 def run_fold(features: pd.DataFrame, labels: pd.DataFrame, fold: WalkForwardFold, config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
     filtered_hmm, hmm_model, hmm_scaler = _fold_hmm_features(features, fold, config)
     fold_labels = labels[labels["session"].isin(fold.train_sessions + fold.validation_sessions + fold.test_sessions)].copy()
@@ -201,6 +262,7 @@ def run_fold(features: pd.DataFrame, labels: pd.DataFrame, fold: WalkForwardFold
 
     fold_dir = output_dir / f"fold_{fold.fold}"
     fold_dir.mkdir(parents=True, exist_ok=True)
+    xgboost_metrics = _run_xgboost_challenger(split_frames, config, fold_dir)
     predictions.to_parquet(fold_dir / "predictions.parquet", index=False)
     signals.to_parquet(fold_dir / "signals.parquet", index=False)
     grid.to_parquet(fold_dir / "threshold_grid.parquet", index=False)
@@ -212,6 +274,10 @@ def run_fold(features: pd.DataFrame, labels: pd.DataFrame, fold: WalkForwardFold
     joblib.dump(calibrator, fold_dir / "calibrator.joblib")
 
     test_metrics = metrics[metrics["split"] == "test_calibrated"].iloc[0].to_dict()
+    xgboost_metrics["xgboost_delta_test_log_loss_vs_hmm_lr"] = xgboost_metrics["xgboost_test_log_loss"] - float(test_metrics["log_loss"])
+    xgboost_metrics["xgboost_delta_signal_net_return_vs_hmm_lr"] = (
+        xgboost_metrics["xgboost_test_signal_net_return"] - test_signal_metrics["net_return"]
+    )
     return {
         "fold": fold.fold,
         "train_months": ",".join(fold.train_months),
@@ -227,6 +293,7 @@ def run_fold(features: pd.DataFrame, labels: pd.DataFrame, fold: WalkForwardFold
         "test_accuracy": float(test_metrics["accuracy"]),
         "test_log_loss": float(test_metrics["log_loss"]),
         **{f"test_signal_{key}": value for key, value in test_signal_metrics.items()},
+        **xgboost_metrics,
     }
 
 
@@ -281,6 +348,7 @@ The current dataset is too short for the configured 5/1/1 month walk-forward sch
 - Predictive scaler/model are fit only on train rows in each fold.
 - Calibration and threshold selection use validation only.
 - Test is evaluated once per fold.
+- XGBoost challenger metrics use base features only and are reported with the `xgboost_` prefix.
 """
 
 

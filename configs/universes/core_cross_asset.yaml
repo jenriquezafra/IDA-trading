@@ -1,0 +1,75 @@
+universe_id: core_cross_asset_v1
+description: Minimal liquid cross-asset context universe for 5min HMM regime research.
+
+context_universe_core:
+  indices:
+    - SPY
+    - QQQ
+    - IWM
+    - DIA
+  sectors:
+    - XLK
+    - XLF
+    - XLE
+    - XLV
+    - XLY
+    - XLP
+    - XLU
+  rates_bonds:
+    - TLT
+    - IEF
+    - SHY
+  credit:
+    - HYG
+    - LQD
+  gold_commodities:
+    - GLD
+    - USO
+
+context_universe_optional:
+  dollar_proxy:
+    - UUP
+  volatility_proxy:
+    - VXX
+  additional_sectors:
+    - XLI
+    - XLB
+    - XLRE
+  semiconductors:
+    - SMH
+    - SOXX
+  mega_caps:
+    - AAPL
+    - MSFT
+    - NVDA
+    - AMZN
+    - GOOGL
+    - META
+    - TSLA
+
+benchmark_universe:
+  - SPY
+  - QQQ
+  - IWM
+
+roles:
+  SPY: broad US equity market and default target.
+  QQQ: large-cap growth and Nasdaq leadership.
+  IWM: small-cap risk appetite and breadth proxy.
+  DIA: Dow/value-tilted large-cap confirmation.
+  XLK: technology sector leadership.
+  XLF: financials and cyclical/value confirmation.
+  XLE: energy and commodity-linked sector pressure.
+  XLV: defensive healthcare leadership.
+  XLY: consumer discretionary and cyclical demand.
+  XLP: consumer staples defensive rotation.
+  XLU: utilities defensive rotation and rates sensitivity.
+  TLT: long-duration Treasury/rates proxy.
+  IEF: intermediate Treasury/rates proxy.
+  SHY: short-duration Treasury/cash-like anchor.
+  HYG: high-yield credit risk appetite.
+  LQD: investment-grade credit defensive spread leg.
+  GLD: gold/haven proxy.
+  UUP: US dollar proxy, optional because initial 5min coverage audit removed many incomplete sessions.
+  USO: oil/energy commodity proxy.
+  VXX: tradeable volatility proxy, optional until data quality is audited.

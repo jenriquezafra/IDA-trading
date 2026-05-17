@@ -1,0 +1,18 @@
+connection:
+  broker: ibkr
+  gateway: ib_gateway
+  trading_mode: paper
+  host: 127.0.0.1
+  port: 4002
+  client_id: 71
+  timeout_seconds: 10
+  expected_account: "DU9782002"
+
+safety:
+  read_only: true
+  allow_orders: false
+  require_paper_account: true
+  require_paper_port: true
+
+outputs:
+  output_dir: results/paper/ibkr_read_only

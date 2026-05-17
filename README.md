@@ -1,8 +1,40 @@
 # IDA Trading
 
-Proyecto de investigacion para una estrategia intradia sobre SPY a frecuencia de 5 minutos.
+IDA Trading se esta reconstruyendo como un research stack modular para pasar de
+alpha research a estrategia, backtest y paper/live con trazabilidad. El codigo
+antiguo queda como base reutilizable, pero la arquitectura activa vive
+directamente bajo `src/`.
 
-El objetivo es evaluar si una combinacion de features causales, regimes HMM, modelo predictivo supervisado y backtest realista puede generar PnL neto positivo y robusto sin posiciones overnight.
+## Arquitectura activa
+
+```text
+data -> features -> alpha -> strategy -> backtesting -> triage -> paper/live
+```
+
+La primera vertical activa es alpha research intradia:
+
+```text
+QQQ 15min
+  -> cross_asset_liquid_15min features
+  -> declarative alpha specs
+  -> StrategySpec
+  -> cost-aware backtest
+  -> promotion gates
+```
+
+## Modulos nuevos
+
+```text
+src/
+  alpha/         alpha specs, thresholds, confirmation gates
+  data/          ingesta/tratamiento de datos externos point-in-time
+  strategy/      StrategySpec, entry/exit/position/risk contracts
+  backtesting/   metricas comunes para research
+  research/      manifests, run ids, artifact contracts
+```
+
+Los modulos pendientes son `features`, `risk` y `execution`. Los scripts legacy
+de `src/*.py` se migraran o eliminaran por fases.
 
 ## Setup
 
@@ -12,169 +44,410 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Estructura
+## Alpha research config
+
+La config inicial vive en:
 
 ```text
-backtest/      utilidades y salidas especificas de backtest
-configs/       configuraciones reproducibles
-data/          datos locales
-  raw/         datos originales
-  cleaned/     datos limpios
-  features/    features y labels
-docs/          documentacion y TODOs
-models/        artefactos entrenados
-notebooks/     analisis exploratorio
-reports/       reportes generados
-src/           codigo del proyecto
-tests/         pruebas
+configs/alpha/alpha_research_v1.yaml
 ```
 
-## Configuracion base
+Incluye:
 
-La configuracion inicial vive en `configs/base.yaml` e incluye parametros de sesion, labeling, HMM, modelo, costes, backtest y walk-forward.
+- target/timeframe y split policy;
+- feature path declarativo;
+- coste primario, conservador y stress;
+- alpha families;
+- confirmation gates;
+- promotion gates.
 
-## Limpieza de datos
+## Datos externos Cboe
 
-Para descargar un dataset inicial reciente de SPY 5 minutos con Yahoo Finance:
+Descargar y tratar volatilidad/put-call diarios point-in-time:
 
 ```bash
 source .venv/bin/activate
-python -m src.data_download --config configs/base.yaml
+python -m src.data.cboe_risk_context --config configs/data/cboe_risk_context.yaml
 ```
 
-Esto guarda `data/raw/spy_5min.parquet`. El historico intradia gratuito suele estar limitado a una ventana reciente, por lo que este dataset sirve para desarrollar el pipeline, no para una validacion robusta final.
-
-El pipeline espera datos OHLCV de SPY a 5 minutos en `data/raw/spy_5min.parquet` o, ajustando `configs/base.yaml`, en un CSV equivalente. Columnas requeridas:
+Esto genera:
 
 ```text
-timestamp
-open
-high
-low
-close
-volume
+data/external/cboe/volatility_indices_daily.parquet
+data/external/cboe/put_call_ratios_daily.parquet
+data/external/cboe/risk_context_daily.parquet
+reports/data_external/cboe_risk_context.md
 ```
 
-Para limpiar y validar:
+El dataset `risk_context_daily.parquet` usa `available_session`: los datos de
+cierre Cboe de una fecha solo quedan disponibles para la siguiente sesion NYSE.
+
+## Contrato de estrategia
+
+Una estrategia operable debe poder expresarse como YAML:
+
+```yaml
+strategy_id: qqq_15min_risk_off_short_h6_v1
+target_symbol: QQQ
+timeframe: 15min
+feature_set_id: cross_asset_liquid_15min
+alpha_id: risk_off_short_h6_q80
+entry_rule: next_open
+exit_rule:
+  horizon_bars: 6
+position:
+  side: short_only
+  max_gross_exposure: 1.0
+risk:
+  no_new_trades_after: "15:45"
+  force_flat_before: "15:55"
+  max_turnover: 4.0
+cost_profile_id: bps_2
+split_policy_id: wf_24m_6m_6m_step6m_embargo1
+```
+
+## Alpha research CLI
+
+Validar la config y mostrar el universo de busqueda:
 
 ```bash
 source .venv/bin/activate
-python -m src.data_cleaning --config configs/base.yaml
+python -m src alpha-research --config configs/alpha/alpha_research_v1.yaml --dry-run
 ```
 
-La salida se guarda en `data/cleaned/spy_5min_clean.parquet` y el reporte en `reports/data_quality.md`.
-
-El limpiador usa calendario NYSE cuando `calendar.enabled: true`: descarta festivos, detecta medias sesiones y, por defecto, elimina medias sesiones para mantener sesiones comparables de 78 barras. Tambien anade columnas de seguridad para evitar targets y entradas que puedan cruzar el cierre.
-
-## Features base
-
-Para generar las features causales:
+Ejecutar el runner y escribir artefactos:
 
 ```bash
 source .venv/bin/activate
-python -m src.feature_engineering --config configs/base.yaml
+python -m src alpha-research --config configs/alpha/alpha_research_v1.yaml
 ```
 
-La salida se guarda en `data/features/features_base.parquet`. Los calculos rolling se reinician por sesion y `rel_volume` usa solo sesiones anteriores para el mismo `bar_index`.
+## Risk-off EDA
 
-## Labels
-
-Para generar labels ternarios con entrada en `open_{t+1}` y salida en `open_{t+h+1}`:
+Generar el analisis exploratorio de la hipotesis risk-off short:
 
 ```bash
 source .venv/bin/activate
-python -m src.labels --config configs/base.yaml
+python -m src.alpha.risk_off_eda
 ```
 
-La salida se guarda en `data/features/labels.parquet`. Las filas cuyo target cruzaria el cierre de sesion se eliminan.
+Esto escribe:
 
-## Baselines
+```text
+reports/eda/risk_off_short/risk_off_short_eda.md
+reports/eda/risk_off_short/bucket_summary.parquet
+reports/eda/risk_off_short/condition_summary.parquet
+reports/eda/risk_off_short/yearly_summary.parquet
+reports/eda/risk_off_short/control_pnl.parquet
+```
 
-Para generar benchmarks simples:
+## Risk-off strategy runner
+
+Ejecutar la primera estrategia rule-based con trades no solapados, costes,
+walk-forward folds y controles:
 
 ```bash
 source .venv/bin/activate
-python -m src.baselines --config configs/base.yaml
+python -m src.strategy.risk_off_short
 ```
 
-El reporte se guarda en `reports/baseline_report.md` y los trades por benchmark en `reports/baseline_trades.parquet`.
+Esto escribe:
 
-## HMM
+```text
+results/strategy/risk_off_short/QQQ/15min/trades.parquet
+results/strategy/risk_off_short/QQQ/15min/daily.parquet
+results/strategy/risk_off_short/QQQ/15min/monthly.parquet
+results/strategy/risk_off_short/QQQ/15min/summary.parquet
+results/strategy/risk_off_short/QQQ/15min/manifest.yaml
+results/strategy/risk_off_short/QQQ/15min/report.md
+```
 
-Para entrenar el HMM y generar probabilidades filtradas:
+La vertical nueva todavia no usa ML. La estrategia actual es intencionadamente
+rule-based: primero se valida si la hipotesis economica produce edge neto y
+estable; despues se decide si merece modelos.
+
+La validacion sigue el esquema del libro en lo importante: datos point-in-time,
+walk-forward train/validation/test, validation para seleccionar, test para
+confirmar, costes y controles. El splitter activo aplica `embargo_sessions: 1`
+para ser conservador en los bordes entre train y validation.
+
+## Risk-off h=6 triage
+
+Diagnosticar el horizonte superviviente con controles agregados, franja
+intradia, dia de semana, concentracion por sesiones y sensibilidad de thresholds
+seleccionada solo con validation:
 
 ```bash
 source .venv/bin/activate
-python -m src.hmm_model --config configs/base.yaml
+python -m src.strategy.risk_off_short_triage
 ```
 
-La salida se guarda en `data/features/hmm_features.parquet`, el modelo en `models/hmm_k4.joblib` y el diagnostico en `reports/regime_diagnostics.md`.
+Esto escribe:
 
-## Modelo Predictivo Base
+```text
+results/strategy/risk_off_short/QQQ/15min/triage/report.md
+results/strategy/risk_off_short/QQQ/15min/triage/controls_rollup.parquet
+results/strategy/risk_off_short/QQQ/15min/triage/candidate_by_fold.parquet
+results/strategy/risk_off_short/QQQ/15min/triage/hour_summary.parquet
+results/strategy/risk_off_short/QQQ/15min/triage/bucket_summary.parquet
+results/strategy/risk_off_short/QQQ/15min/triage/weekday_summary.parquet
+results/strategy/risk_off_short/QQQ/15min/triage/session_concentration.parquet
+results/strategy/risk_off_short/QQQ/15min/triage/threshold_sensitivity.parquet
+results/strategy/risk_off_short/QQQ/15min/triage/selected_threshold_confirmation.parquet
+results/strategy/risk_off_short/QQQ/15min/triage/selected_threshold_trades.parquet
+results/strategy/risk_off_short/QQQ/15min/triage/selected_threshold_controls.parquet
+results/strategy/risk_off_short/QQQ/15min/triage/selected_threshold_concentration.parquet
+results/strategy/risk_off_short/QQQ/15min/triage/promotion_gates.parquet
+results/strategy/risk_off_short/QQQ/15min/triage/promotion_decision.yaml
+```
 
-Para entrenar la Logistic Regression base sin HMM:
+Promotion gates son reglas duras para decidir si un candidato puede pasar de
+research a `freeze_review`. No buscan mejorar el backtest; bloquean candidatos
+fragiles aunque el PnL sea positivo. En H1 cubren muestra minima, folds
+positivos, retorno neto, coste stress, mejora contra controles y concentracion
+por sesiones. La implementacion comun vive en `src/research/promotion.py`; H1
+solo aporta sus artefactos y su `candidate_label`.
+
+## Risk-off promotion-aware sweep
+
+Buscar variantes de H1 que reparen la concentracion sin seleccionar con test:
 
 ```bash
 source .venv/bin/activate
-python -m src.predictive_model --config configs/base.yaml
+python -m src.strategy.risk_off_short_promotion_sweep
 ```
 
-Las probabilidades se guardan en `data/features/predictive_base_predictions.parquet`, el reporte en `reports/predictive_base_report.md` y los artefactos en `models/predictive_base/fold_0/`.
+Esto escribe:
 
-Para entrenar la variante con HMM:
+```text
+results/strategy/risk_off_short/QQQ/15min/promotion_sweep/report.md
+results/strategy/risk_off_short/QQQ/15min/promotion_sweep/manifest.yaml
+results/strategy/risk_off_short/QQQ/15min/promotion_sweep/validation_sweep.parquet
+results/strategy/risk_off_short/QQQ/15min/promotion_sweep/validation_gates.parquet
+results/strategy/risk_off_short/QQQ/15min/promotion_sweep/selected_variant.yaml
+results/strategy/risk_off_short/QQQ/15min/promotion_sweep/selected_controls.parquet
+results/strategy/risk_off_short/QQQ/15min/promotion_sweep/selected_concentration.parquet
+results/strategy/risk_off_short/QQQ/15min/promotion_sweep/selected_gates.parquet
+results/strategy/risk_off_short/QQQ/15min/promotion_sweep/selected_decision.yaml
+```
+
+El sweep actual evalua `128` variantes de thresholds y franja horaria. Ninguna
+pasa todos los gates de validation. La variante seleccionada por validation es
+`riskq80__vixq50__all`; mejora muestra y PnL, pero la decision final sigue en
+`continue_research` porque falla concentracion por sesiones:
+`validation_top5_abs_share` y `test_top5_abs_share`.
+
+## Risk-off H1b concentration sweep
+
+Reformular H1 con filtros economicos adicionales para reparar concentracion:
 
 ```bash
 source .venv/bin/activate
-python -m src.predictive_model_hmm --config configs/base.yaml
+python -m src.strategy.risk_off_short_h1b_sweep
 ```
 
-Las probabilidades se guardan en `data/features/predictive_hmm_predictions.parquet`, el reporte en `reports/predictive_hmm_report.md` y los artefactos en `models/predictive_hmm/fold_0/`.
+Esto escribe:
 
-## Señales
+```text
+results/strategy/risk_off_short/QQQ/15min/h1b_concentration_sweep/report.md
+results/strategy/risk_off_short/QQQ/15min/h1b_concentration_sweep/manifest.yaml
+results/strategy/risk_off_short/QQQ/15min/h1b_concentration_sweep/validation_sweep.parquet
+results/strategy/risk_off_short/QQQ/15min/h1b_concentration_sweep/validation_gates.parquet
+results/strategy/risk_off_short/QQQ/15min/h1b_concentration_sweep/selected_variant.yaml
+results/strategy/risk_off_short/QQQ/15min/h1b_concentration_sweep/selected_trades.parquet
+results/strategy/risk_off_short/QQQ/15min/h1b_concentration_sweep/selected_controls.parquet
+results/strategy/risk_off_short/QQQ/15min/h1b_concentration_sweep/selected_concentration.parquet
+results/strategy/risk_off_short/QQQ/15min/h1b_concentration_sweep/selected_gates.parquet
+results/strategy/risk_off_short/QQQ/15min/h1b_concentration_sweep/selected_decision.yaml
+```
 
-Para convertir probabilidades en senales `long/short/flat`:
+El sweep H1b evalua `840` variantes con filtros de credito, defensivos,
+breadth, VIX extremo y term structure. `26` variantes pasan todos los gates de
+validation. La variante seleccionada por validation es
+`riskq55__vixq45__credit_weak_q50`, que exige credito debil
+(`spread_credit_12` por debajo de su mediana de train). La confirmacion final
+pasa todos los gates de validation y test, por lo que la decision queda en
+`freeze_review`.
+
+## H1b StrategySpec freeze
+
+La variante H1b congelada vive en:
+
+```text
+configs/strategy/qqq_15min_risk_off_short_h1b_v1.yaml
+```
+
+Congelar spec, thresholds por fold y fingerprints de artefactos:
 
 ```bash
 source .venv/bin/activate
-python -m src.signal --config configs/base.yaml
+python -m src.strategy.freeze_risk_off_short_h1b
 ```
 
-Las senales se guardan en `data/features/signals.parquet` y el reporte en `reports/signal_report.md`.
+Esto escribe:
 
-## Backtest
+```text
+results/strategy/risk_off_short/QQQ/15min/freeze_review/qqq_15min_risk_off_short_h1b_v1/strategy_spec.yaml
+results/strategy/risk_off_short/QQQ/15min/freeze_review/qqq_15min_risk_off_short_h1b_v1/fold_thresholds.parquet
+results/strategy/risk_off_short/QQQ/15min/freeze_review/qqq_15min_risk_off_short_h1b_v1/freeze_review_decision.yaml
+results/strategy/risk_off_short/QQQ/15min/freeze_review/qqq_15min_risk_off_short_h1b_v1/manifest.yaml
+```
 
-Para ejecutar el backtest event-driven:
+El `manifest.yaml` es el artefacto canonico de freeze review: incluye
+fingerprints de features, risk context, sweep H1b, selected trades/controls,
+promotion gates, spec congelado y thresholds entrenados por fold.
+
+## H1b pre-paper robustness
+
+Ejecutar robustez local desde el `StrategySpec` congelado:
 
 ```bash
 source .venv/bin/activate
-python -m src.backtest --config configs/base.yaml
+python -m src.strategy.risk_off_short_h1b_robustness
 ```
 
-El backtest usa costes de `src.costs`, restricciones de `src.risk`, entra siempre en `open_{t+1}` y guarda `reports/backtest_trades.parquet`, `reports/equity_curve.parquet`, `reports/daily_pnl.parquet` y `reports/backtest_report.md`.
+Esto escribe:
 
-## Walk-Forward
+```text
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1b_v1/report.md
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1b_v1/manifest.yaml
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1b_v1/local_threshold_sweep.parquet
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1b_v1/local_threshold_gates.parquet
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1b_v1/cost_sensitivity.parquet
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1b_v1/subperiod_summary.parquet
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1b_v1/fold_stability.parquet
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1b_v1/robustness_decision.yaml
+```
 
-Para ejecutar el pipeline walk-forward mensual:
+Resultado actual: `needs_more_research`. La variante ancla pasa gates, y `6/27`
+variantes locales pasan todos los gates, pero todas dependen de `credit_q50`.
+Mover el filtro de credito a `q45` o `q55` degrada el edge. La estrategia tambien
+deja de ser positiva a `7.5` y `10` bps. No esta rechazada, pero no pasa a paper
+hasta reparar o justificar la fragilidad del filtro de credito.
+
+## H1c credit repair
+
+Reparar el filtro de credito exacto con reglas economicas interpretables:
 
 ```bash
 source .venv/bin/activate
-python -m src.walkforward --config configs/base.yaml
+python -m src.strategy.risk_off_short_h1c_credit_repair
 ```
 
-El esquema configurado es fit 5 meses, validation 1 mes, test 1 mes y step 1 mes. Con el dataset inicial de yfinance no hay meses suficientes para generar folds reales; el reporte se guarda en `reports/walkforward_folds_summary.md`.
+Esto escribe:
 
-## Evaluacion
+```text
+results/strategy/risk_off_short/QQQ/15min/h1c_credit_repair/report.md
+results/strategy/risk_off_short/QQQ/15min/h1c_credit_repair/manifest.yaml
+results/strategy/risk_off_short/QQQ/15min/h1c_credit_repair/validation_sweep.parquet
+results/strategy/risk_off_short/QQQ/15min/h1c_credit_repair/validation_gates.parquet
+results/strategy/risk_off_short/QQQ/15min/h1c_credit_repair/selected_variant.yaml
+results/strategy/risk_off_short/QQQ/15min/h1c_credit_repair/selected_trades.parquet
+results/strategy/risk_off_short/QQQ/15min/h1c_credit_repair/selected_controls.parquet
+results/strategy/risk_off_short/QQQ/15min/h1c_credit_repair/selected_concentration.parquet
+results/strategy/risk_off_short/QQQ/15min/h1c_credit_repair/selected_gates.parquet
+results/strategy/risk_off_short/QQQ/15min/h1c_credit_repair/selected_cost_sensitivity.parquet
+results/strategy/risk_off_short/QQQ/15min/h1c_credit_repair/selected_decision.yaml
+```
 
-Para generar el resumen neto de evaluacion:
+Resultado actual: `credit_repaired`. La variante seleccionada por validation es
+`riskq50__vixq45__credit_spread_lte_0`: exige que `spread_credit_12 <= 0`, una
+regla economica interpretable equivalente a HYG no liderando a LQD. Pasa todos
+los promotion gates en validation y test, queda positiva a `7.5 bps`, y solo
+falla como warning a `10 bps`.
+
+## H1c StrategySpec freeze
+
+La variante H1c congelada vive en:
+
+```text
+configs/strategy/qqq_15min_risk_off_short_h1c_v1.yaml
+```
+
+Congelar spec, thresholds por fold y fingerprints:
 
 ```bash
 source .venv/bin/activate
-python -m src.evaluation --config configs/base.yaml
+python -m src.strategy.freeze_risk_off_short_h1c
 ```
 
-El reporte se guarda en `reports/walkforward_summary.md` y las metricas agregadas en `reports/evaluation_metrics.parquet`. Con el dataset inicial el reporte calcula metricas sobre los artefactos disponibles, pero marca que no hay folds walk-forward reales suficientes para evidencia OOS robusta.
+Esto escribe:
 
-## Documentacion
+```text
+results/strategy/risk_off_short/QQQ/15min/freeze_review/qqq_15min_risk_off_short_h1c_v1/strategy_spec.yaml
+results/strategy/risk_off_short/QQQ/15min/freeze_review/qqq_15min_risk_off_short_h1c_v1/fold_thresholds.parquet
+results/strategy/risk_off_short/QQQ/15min/freeze_review/qqq_15min_risk_off_short_h1c_v1/freeze_review_decision.yaml
+results/strategy/risk_off_short/QQQ/15min/freeze_review/qqq_15min_risk_off_short_h1c_v1/manifest.yaml
+```
 
-- `docs/PROJECT_ARCHITECTURE.md`: definicion del problema, arquitectura y decisiones de diseno.
-- `docs/TODOs.md`: roadmap de implementacion por bloques.
+## H1c pre-paper robustness
+
+Ejecutar robustez local desde el `StrategySpec` H1c congelado:
+
+```bash
+source .venv/bin/activate
+python -m src.strategy.risk_off_short_h1c_robustness
+```
+
+Esto escribe:
+
+```text
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1c_v1/report.md
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1c_v1/manifest.yaml
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1c_v1/local_threshold_sweep.parquet
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1c_v1/local_threshold_gates.parquet
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1c_v1/cost_sensitivity.parquet
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1c_v1/subperiod_summary.parquet
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1c_v1/fold_stability.parquet
+results/strategy/risk_off_short/QQQ/15min/robustness/qqq_15min_risk_off_short_h1c_v1/robustness_decision.yaml
+```
+
+Resultado actual: `paper_candidate`. `6/9` variantes locales pasan todos los
+gates, con soporte en `3` quantiles de risk y `2` quantiles de VIX. La estrategia
+sigue positiva a `7.5 bps` en validation y test; `10 bps` queda como warning.
+
+## IBKR Gateway read-only
+
+Config paper read-only:
+
+```text
+configs/execution/ibkr_paper_readonly.yaml
+```
+
+Validar config sin conectar:
+
+```bash
+source .venv/bin/activate
+python -m src.execution.ibkr_read_only --validate-only
+```
+
+Health-check contra IB Gateway paper:
+
+```bash
+source .venv/bin/activate
+python -m src.execution.ibkr_read_only
+```
+
+Snapshot read-only de account summary, posiciones y open trades:
+
+```bash
+source .venv/bin/activate
+python -m src.execution.ibkr_read_only --snapshot
+```
+
+El cliente solo permite `trading_mode: paper`, `read_only: true`,
+`allow_orders: false` y puerto paper de IB Gateway/TWS (`4002` o `7497`). Esta
+fase no envia ordenes ni liquida posiciones.
+
+## Tests focalizados
+
+```bash
+source .venv/bin/activate
+pytest tests/test_alpha_specs.py tests/test_alpha_research_runner.py tests/test_backtesting_metrics.py tests/test_cboe_risk_context.py tests/test_ibkr_read_only.py tests/test_promotion_gates.py tests/test_risk_off_eda.py tests/test_risk_off_short_strategy.py tests/test_risk_off_short_triage.py tests/test_risk_off_short_promotion_sweep.py tests/test_risk_off_short_h1b_sweep.py tests/test_risk_off_short_h1b_freeze.py tests/test_risk_off_short_h1b_robustness.py tests/test_risk_off_short_h1c_credit_repair.py tests/test_risk_off_short_h1c_freeze.py tests/test_risk_off_short_h1c_robustness.py tests/test_strategy_manifest.py
+```
+
+## Estado legacy
+
+El repo aun contiene datos, resultados, reportes y scripts antiguos. No son la guia
+activa. Se conservaran solo mientras se migren piezas utiles a los paquetes
+activos bajo `src/`.

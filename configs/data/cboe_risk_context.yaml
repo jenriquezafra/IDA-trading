@@ -1,0 +1,12 @@
+start_date: "2021-05-01"
+end_date: "2026-05-08"
+calendar: NYSE
+volatility_symbols: [VIX, VIX9D, VIX3M, VVIX]
+zscore_window: 20
+max_workers: 12
+
+paths:
+  volatility: data/external/cboe/volatility_indices_daily.parquet
+  put_call: data/external/cboe/put_call_ratios_daily.parquet
+  context: data/external/cboe/risk_context_daily.parquet
+  report: reports/data_external/cboe_risk_context.md

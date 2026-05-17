@@ -11,3 +11,9 @@ pyyaml
 joblib
 pytest
 yfinance
+streamlit
+fastapi
+uvicorn
+duckdb
+pydantic
+ib_insync

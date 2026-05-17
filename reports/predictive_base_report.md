@@ -5,17 +5,18 @@
 - Input labels: `data/features/labels.parquet`
 - Model: multinomial Logistic Regression with elastic-net regularization
 - Calibration: `sigmoid` on validation split
-- Train sessions: 35 (`2026-02-04` to `2026-03-25`)
-- Validation sessions: 11 (`2026-03-26` to `2026-04-10`)
-- Test sessions: 13 (`2026-04-13` to `2026-04-29`)
+- Train sessions: 747 (`2021-05-04` to `2024-04-26`)
+- Validation sessions: 249 (`2024-04-29` to `2025-04-30`)
+- Test sessions: 249 (`2025-05-01` to `2026-05-01`)
 
 ## Metrics
 
 | split | rows | accuracy | balanced_accuracy | macro_f1 | log_loss | avg_p_down | avg_p_neutral | avg_p_up |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| train_uncalibrated | 1785 | 0.410084 | 0.419327 | 0.377933 | 1.060096 | 0.326964 | 0.345070 | 0.327966 |
-| validation_calibrated | 561 | 0.645276 | 0.333333 | 0.261466 | 0.887553 | 0.182717 | 0.643586 | 0.173696 |
-| test_calibrated | 663 | 0.630468 | 0.333333 | 0.257786 | 0.923610 | 0.231516 | 0.597041 | 0.171443 |
+| train_uncalibrated | 38097 | 0.447148 | 0.400129 | 0.385162 | 1.075003 | 0.328989 | 0.342465 | 0.328545 |
+| validation_calibrated | 12699 | 0.633357 | 0.333308 | 0.260906 | 0.905682 | 0.175768 | 0.635288 | 0.188944 |
+| test_calibrated | 12699 | 0.630995 | 0.333333 | 0.257918 | 0.907742 | 0.176878 | 0.637090 | 0.186031 |
+
 
 ## Feature Columns
 

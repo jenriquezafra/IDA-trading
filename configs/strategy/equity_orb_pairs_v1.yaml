@@ -1,0 +1,84 @@
+strategy_id: equity_orb_pairs_v1
+hypothesis_id: H2.2
+description: >
+  Equity ORB over relative log spreads. ORB is treated as a trigger on
+  intraday relative leadership, not as standalone directional edge.
+
+timeframe: 5min
+entry_rule: next_open
+
+data:
+  provider: polygon
+  panel_path: data/aligned/QQQ/5min/core_cross_asset_v1/panel.parquet
+  timestamp_timezone: America/New_York
+  regular_session: "09:30-16:00"
+
+pairs:
+  - pair_id: QQQ_SPY
+    asset_a: QQQ
+    asset_b: SPY
+    rationale: growth/tech vs broad market
+  - pair_id: XLK_SPY
+    asset_a: XLK
+    asset_b: SPY
+    rationale: technology sector vs broad market
+  - pair_id: IWM_SPY
+    asset_a: IWM
+    asset_b: SPY
+    rationale: small caps vs large caps
+  - pair_id: XLY_XLP
+    asset_a: XLY
+    asset_b: XLP
+    rationale: risk-on discretionary vs defensive staples
+  - pair_id: HYG_LQD
+    asset_a: HYG
+    asset_b: LQD
+    rationale: high yield credit vs investment grade credit
+
+spread:
+  type: log_ratio
+  formula: log(asset_a) - log(asset_b)
+  price_column: close
+
+orb:
+  windows:
+    - window_id: orb_15m
+      label: "09:30-09:45"
+      range_bars: 3
+    - window_id: orb_30m
+      label: "09:30-10:00"
+      range_bars: 6
+  trigger_price: spread_close
+  signal_rule: close_outside_opening_range
+  trade_policy: first_breakout_per_session
+
+exit:
+  horizon_bars: [2, 3, 4, 6]
+  force_flat_intraday: true
+
+position:
+  type: pair
+  sizing: dollar_neutral
+  gross_exposure: 1.0
+  beta_neutral: false
+
+costs:
+  # Round-trip bps per leg, reported on gross exposure.
+  round_trip_bps_per_leg: [1.0, 2.0, 5.0, 10.0]
+
+controls:
+  directional_orb_baseline: true
+  random_same_frequency: true
+  same_hour: true
+  market_beta: true
+  random_seed: 2202
+
+split_policy:
+  train_months: 24
+  validation_months: 6
+  test_months: 6
+  step_months: 6
+  embargo_sessions: 1
+
+outputs:
+  output_dir: results/strategy/equity_orb_pairs/5min

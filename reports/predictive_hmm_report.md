@@ -5,17 +5,17 @@
 - Input labels: `data/features/labels.parquet`
 - Model: multinomial Logistic Regression with elastic-net regularization
 - Calibration: `sigmoid` on validation split
-- Train sessions: 35 (`2026-02-04` to `2026-03-25`)
-- Validation sessions: 11 (`2026-03-26` to `2026-04-10`)
-- Test sessions: 13 (`2026-04-13` to `2026-04-29`)
+- Train sessions: 747 (`2021-05-04` to `2024-04-26`)
+- Validation sessions: 249 (`2024-04-29` to `2025-04-30`)
+- Test sessions: 249 (`2025-05-01` to `2026-05-01`)
 
 ## Metrics
 
 | split | rows | accuracy | balanced_accuracy | macro_f1 | log_loss | avg_p_down | avg_p_neutral | avg_p_up |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| train_uncalibrated | 1785 | 0.417367 | 0.438420 | 0.389906 | 1.056659 | 0.327155 | 0.345211 | 0.327634 |
-| validation_calibrated | 561 | 0.645276 | 0.333333 | 0.261466 | 0.886193 | 0.182729 | 0.643598 | 0.173673 |
-| test_calibrated | 663 | 0.630468 | 0.333333 | 0.257786 | 0.926168 | 0.237262 | 0.594121 | 0.168618 |
+| train_uncalibrated | 38097 | 0.444864 | 0.401887 | 0.385531 | 1.074111 | 0.328792 | 0.342854 | 0.328354 |
+| validation_calibrated | 12699 | 0.633436 | 0.333415 | 0.261158 | 0.905728 | 0.175868 | 0.635114 | 0.189018 |
+| test_calibrated | 12699 | 0.630995 | 0.333333 | 0.257918 | 0.907797 | 0.176604 | 0.638333 | 0.185063 |
 
 
 ## Feature Columns
@@ -70,14 +70,14 @@
 
 | metric | base | with_hmm | delta | improved |
 | --- | --- | --- | --- | --- |
-| accuracy | 0.630468 | 0.630468 | 0.000000 | False |
+| accuracy | 0.630995 | 0.630995 | 0.000000 | False |
 | balanced_accuracy | 0.333333 | 0.333333 | 0.000000 | False |
-| macro_f1 | 0.257786 | 0.257786 | 0.000000 | False |
-| log_loss | 0.923610 | 0.926168 | 0.002558 | False |
+| macro_f1 | 0.257918 | 0.257918 | 0.000000 | False |
+| log_loss | 0.907742 | 0.907797 | 0.000054 | False |
 
 ## Simple Test Score Rule Net Return
 
 | model | test_rule_net_return | test_rule_trades |
 | --- | --- | --- |
-| base | -0.092243 | 663 |
-| with_hmm | -0.092243 | 663 |
+| base | -1.179687 | 12699 |
+| with_hmm | -1.239787 | 12699 |

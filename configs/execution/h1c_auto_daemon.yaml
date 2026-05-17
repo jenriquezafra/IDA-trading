@@ -1,0 +1,15 @@
+daemon:
+  auto_runner_config_path: configs/execution/h1c_auto_runner.yaml
+  open_scan_interval_seconds: 900
+  pre_open_wakeup_minutes: 15
+  pre_open_scan_interval_seconds: 900
+  active_reconciliation_interval_seconds: 60
+  error_sleep_seconds: 300
+  max_error_sleep_seconds: 900
+  calendar: NYSE
+  skip_cboe: true
+  skip_download: false
+
+outputs:
+  output_dir: results/paper/h1c_auto_runner
+  status_path: results/paper/h1c_auto_runner/daemon_status.yaml

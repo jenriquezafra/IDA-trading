@@ -1,0 +1,95 @@
+proxy_id: equity_earnings_continuation_h3_peer_proxy_v1
+hypothesis_id: H3
+status: sector_etf_proxy_v1
+as_of_contract: "2026-05-15"
+description: >
+  Peer proxy contract for H3 earnings continuation. V1 uses sector ETFs as
+  economic peer proxies instead of firm-level peer baskets. Firm-level baskets
+  are deferred until the event dataset and sector mapping are stable.
+
+policy:
+  primary_proxy: sector_etf
+  firm_level_peer_baskets: deferred_v2
+  missing_proxy_policy: fallback_to_spy_and_flag
+  simultaneous_peer_earnings_policy: sector_etf_proxy_only_in_v1
+  selection_filter_usage: sector_or_peer_return_30m_must_not_contradict
+  residual_return_usage: subtract_sector_proxy_return_for_diagnostics
+  promotion_requirement: >
+    Freeze review must either keep sector ETF proxy and show robustness, or add
+    firm-level peer baskets with a point-in-time membership audit.
+
+required_context_symbols:
+  - SPY
+  - XLB
+  - XLC
+  - XLE
+  - XLF
+  - XLI
+  - XLK
+  - XLP
+  - XLRE
+  - XLU
+  - XLV
+  - XLY
+
+features:
+  peer_proxy_return_30m:
+    source: sector_etf_first_30m_return
+    fallback: spy_first_30m_return
+  residual_return_primary:
+    formula: stock_return_net - sector_proxy_return
+  confirmation_filter:
+    field: sector_return_30m
+    operator: ">="
+    value: -0.001
+
+sector_proxies:
+  communication_services:
+    primary_proxy: XLC
+    fallback_proxy: SPY
+    notes: fallback handles any dates without clean XLC coverage.
+  consumer_discretionary:
+    primary_proxy: XLY
+    fallback_proxy: SPY
+  consumer_staples:
+    primary_proxy: XLP
+    fallback_proxy: SPY
+  energy:
+    primary_proxy: XLE
+    fallback_proxy: SPY
+  financials:
+    primary_proxy: XLF
+    fallback_proxy: SPY
+  healthcare:
+    primary_proxy: XLV
+    fallback_proxy: SPY
+  industrials:
+    primary_proxy: XLI
+    fallback_proxy: SPY
+  materials:
+    primary_proxy: XLB
+    fallback_proxy: SPY
+  real_estate:
+    primary_proxy: XLRE
+    fallback_proxy: SPY
+  technology:
+    primary_proxy: XLK
+    fallback_proxy: SPY
+  utilities:
+    primary_proxy: XLU
+    fallback_proxy: SPY
+
+audit_requirements:
+  coverage_before_screening: true
+  hash_in_manifest: true
+  required_fields_in_events:
+    - sector_id
+    - sector_proxy
+    - peer_proxy_symbol
+    - peer_proxy_fallback_used
+    - peer_proxy_return_30m
+  diagnostics:
+    - fallback_rate_by_sector
+    - fallback_rate_by_year
+    - residual_return_vs_sector_proxy
+    - signal_count_by_sector_proxy

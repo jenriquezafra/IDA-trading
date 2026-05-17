@@ -1,0 +1,25 @@
+runner:
+  mode: signal_only
+  threshold_policy: latest_frozen_fold
+  max_data_staleness_days: 3
+
+strategy:
+  strategy_spec_path: configs/strategy/qqq_15min_risk_off_short_h1c_v1.yaml
+  freeze_manifest_path: results/strategy/risk_off_short/QQQ/15min/freeze_review/qqq_15min_risk_off_short_h1c_v1/manifest.yaml
+  fold_thresholds_path: results/strategy/risk_off_short/QQQ/15min/freeze_review/qqq_15min_risk_off_short_h1c_v1/fold_thresholds.parquet
+
+data:
+  features_path: data/features/QQQ/15min/core_cross_asset_v1/cross_asset_liquid_15min/features.parquet
+  risk_context_path: data/external/cboe/risk_context_daily.parquet
+
+paper:
+  target_account: DU9782002
+  target_symbol: QQQ
+  unit_size: 1.0
+  order_type: MKT
+  time_in_force: DAY
+  execution_timing: next_bar_open_simulated
+  send_orders: false
+
+outputs:
+  output_dir: results/paper/h1c_signal_runner

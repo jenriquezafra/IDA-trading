@@ -1,0 +1,81 @@
+feature_set_version: cross_asset_liquid_15min
+description: 15min feature set for opening-bias followthrough research using a 30min opening bias.
+
+return_windows: [1, 2, 3, 4, 6, 8, 12, 24]
+range_ratio_short_window: 2
+range_ratio_long_window: 8
+range_ratio_windows:
+  - [2, 8]
+  - [6, 24]
+efficiency_window: 4
+efficiency_windows: [4, 12]
+vwap_slope_window: 4
+vwap_slope_windows: [4, 12]
+atr_windows: [2, 4, 12]
+frequency: 15min
+breadth_windows: [2, 6, 12, 24]
+
+setup_features:
+  opening_range_bars: [1, 2, 4, 6, 12]
+  rolling_breakout_windows: [4, 8, 12]
+  realized_vol_windows: [1, 2, 4, 8, 12]
+  expected_by_bar_min_periods: 20
+  atr_column: target_atr_2
+  breakout_persistence_windows: [2, 4]
+  volume_accel_windows: [2, 4]
+  lunch_start: "12:00"
+  lunch_end: "14:00"
+
+groups:
+  indices: [SPY, QQQ, IWM, DIA]
+  sectors: [XLK, XLF, XLE, XLV, XLY, XLP, XLU]
+  growth: [QQQ, XLK, XLY]
+  cyclicals: [IWM, XLY, XLF, XLE]
+  defensives: [XLP, XLV, XLU]
+  bonds: [TLT, IEF]
+  credit_risk: [HYG]
+  credit_quality: [LQD]
+  haven: [TLT, IEF, GLD]
+  commodities: [GLD, USO]
+
+hmm_feature_columns:
+  - target_ret_1
+  - target_ret_2
+  - target_ret_4
+  - target_ret_8
+  - target_range_ratio_2_8
+  - target_signed_efficiency_4
+  - target_dir_persistence_4
+  - target_dist_vwap_atr
+  - target_dist_open
+  - target_pos_session_range
+  - target_intraday_runup
+  - relret_QQQ_SPY_6
+  - relret_IWM_SPY_6
+  - relret_DIA_SPY_6
+  - relret_XLK_SPY_6
+  - relret_XLP_SPY_6
+  - relret_TLT_SPY_12
+  - relret_IEF_SPY_12
+  - relret_GLD_SPY_12
+  - relret_HYG_LQD_12
+  - spread_growth_defensive_12
+  - spread_cyclicals_defensive_12
+  - spread_tech_broad_12
+  - spread_equity_bonds_12
+  - spread_equity_gold_12
+  - spread_credit_12
+  - positive_index_count_2
+  - positive_sector_count_2
+  - sector_above_vwap_count
+  - sector_rel_strength_count_6
+  - leadership_concentration_score_6
+  - market_range_ratio_2_8
+  - sector_range_dispersion_12
+  - cross_asset_vol_expansion_score
+  - intraday_stress_score
+  - risk_on_score
+  - risk_off_score
+  - defensive_rotation_score
+  - narrow_rally_score
+  - chop_score

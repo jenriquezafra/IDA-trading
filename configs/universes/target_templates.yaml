@@ -1,0 +1,102 @@
+templates:
+  broad_market:
+    description: ETF or index-like target.
+    context_symbols:
+      - SPY
+      - QQQ
+      - IWM
+      - DIA
+      - XLK
+      - XLF
+      - XLE
+      - XLV
+      - XLY
+      - XLP
+      - XLU
+      - TLT
+      - IEF
+      - HYG
+      - LQD
+      - GLD
+      - UUP
+      - USO
+    benchmark_symbols:
+      - SPY
+      - QQQ
+      - IWM
+
+  tech_single_name:
+    description: Large liquid technology single-name target.
+    context_symbols:
+      - SPY
+      - QQQ
+      - IWM
+      - XLK
+      - XLY
+      - TLT
+      - HYG
+      - GLD
+      - UUP
+      - AAPL
+      - MSFT
+      - NVDA
+      - AMZN
+      - GOOGL
+      - META
+    benchmark_symbols:
+      - SPY
+      - QQQ
+      - XLK
+
+  semiconductor_single_name:
+    description: Semiconductor single-name target such as AMD or NVDA.
+    context_symbols:
+      - SPY
+      - QQQ
+      - IWM
+      - XLK
+      - SMH
+      - SOXX
+      - TLT
+      - HYG
+      - GLD
+      - UUP
+      - NVDA
+      - INTC
+      - AVGO
+      - MU
+    benchmark_symbols:
+      - SPY
+      - QQQ
+      - XLK
+      - SMH
+
+  consumer_single_name:
+    description: Consumer discretionary or staples single-name target.
+    context_symbols:
+      - SPY
+      - QQQ
+      - IWM
+      - XLY
+      - XLP
+      - XLF
+      - TLT
+      - HYG
+      - GLD
+      - UUP
+      - AMZN
+      - TSLA
+      - WMT
+      - COST
+      - HD
+      - MCD
+    benchmark_symbols:
+      - SPY
+      - QQQ
+      - XLY
+      - XLP
+
+  custom:
+    description: User-defined target context in configs/hmm_lab.yaml.
+    context_symbols: []
+    benchmark_symbols: []

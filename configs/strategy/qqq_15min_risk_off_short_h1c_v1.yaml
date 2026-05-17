@@ -1,0 +1,76 @@
+strategy_id: qqq_15min_risk_off_short_h1c_v1
+candidate_id: C1
+target_symbol: QQQ
+timeframe: 15min
+feature_set_id: cross_asset_liquid_15min
+alpha_id: risk_off_short_h1c_credit_spread_v1
+entry_rule: next_open
+exit_rule:
+  type: fixed_horizon_open
+  horizon_bars: 6
+position:
+  side: short_only
+  max_gross_exposure: 1.0
+  sizing: fixed_unit
+risk:
+  no_new_trades_after: "15:45"
+  force_flat_before: "15:55"
+  max_turnover: 4.0
+cost_profile_id: bps_2_primary_bps_5_stress_bps_7_5_review
+split_policy_id: wf_24m_6m_6m_step6m_embargo1
+
+alpha:
+  hypothesis_id: H1c
+  parent_hypothesis_id: H1b
+  selected_variant_id: riskq50__vixq45__credit_spread_lte_0
+  candidate_label: target_breakdown__risk_off__vix_pressure
+  description: >
+    Short QQQ after intraday target breakdown when risk-off context, prior VIX
+    pressure and non-risk-on credit confirm de-risking.
+  rules:
+    - column: target_ret_6
+      operator: "<"
+      value: 0.0
+      fitted_on: fixed_rule
+    - column: target_ret_12
+      operator: "<"
+      value: 0.0
+      fitted_on: fixed_rule
+    - column: risk_off_score
+      operator: ">="
+      fit_on: train_fold
+      quantile: 0.50
+    - column: prev_vix_z20
+      operator: ">="
+      fit_on: train_fold
+      quantile: 0.45
+    - column: spread_credit_12
+      operator: "<="
+      value: 0.0
+      fitted_on: fixed_rule
+      filter_policy: credit_spread_lte_0
+  economic_rationale: >
+    QQQ downside continuation should be more reliable when credit is not
+    confirming risk-on. The rule uses spread_credit_12 <= 0, equivalent to HYG
+    not leading LQD over the intraday lookback.
+
+data:
+  provider: polygon
+  feature_path: data/features/QQQ/15min/core_cross_asset_v1/cross_asset_liquid_15min/features.parquet
+  risk_context_path: data/external/cboe/risk_context_daily.parquet
+  point_in_time_rule: join Cboe daily context with session == available_session
+
+costs:
+  primary_bps: 2.0
+  stress_bps: 5.0
+  review_bps: 7.5
+  fail_bps: 10.0
+
+selection:
+  source_runner: python -m src.strategy.risk_off_short_h1c_credit_repair
+  source_dir: results/strategy/risk_off_short/QQQ/15min/h1c_credit_repair
+  selected_with: validation_only
+  test_usage: confirmation_only
+  promotion_status: freeze_review
+  repair_status: credit_repaired
+  promotion_gate_set: DEFAULT_PROMOTION_GATES

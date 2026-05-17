@@ -1,0 +1,20 @@
+cycle:
+  strategy_id: qqq_15min_risk_off_short_h1c_v1
+  account: DU9782002
+  symbol: QQQ
+  refresh_data: true
+  apply_state: true
+  reconcile_after_state: true
+  signal_only: true
+  default_skip_download: false
+  default_skip_cboe: true
+  default_refresh_dry_run: false
+
+components:
+  data_refresh_config_path: configs/execution/paper_data_refresh.yaml
+  signal_runner_config_path: configs/execution/paper_runner_h1c_signal_only.yaml
+  state_config_path: configs/execution/paper_state_h1c.yaml
+  reconciliation_config_path: configs/execution/paper_reconcile_h1c.yaml
+
+outputs:
+  output_dir: results/paper/h1c_cycle

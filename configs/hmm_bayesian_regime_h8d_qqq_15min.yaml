@@ -1,0 +1,89 @@
+project:
+  name: ida-trading
+  timezone: America/New_York
+  frequency: 15min
+lab:
+  target_symbol: QQQ
+  timeframe: 15min
+  universe_id: core_cross_asset_v1
+paths:
+  features_dir: data/features
+  models_dir: models/h8_probability_allocation
+  results_dir: results/h8_probability_allocation
+  reports_dir: reports/h8_probability_allocation
+bayesian_regime_h8:
+  feature_set_version: cross_asset_liquid_15min
+  momentum_column: target_ret_4
+  volatility_column: target_rv_12_rel_by_bar
+  efficiency_column: target_signed_efficiency_12
+  variants:
+    - manual_h8a
+  walk_forward:
+    train_months: 24
+    validation_months: 6
+    test_months: 6
+    step_months: 6
+  max_folds: 3
+  trained_n_states: 4
+  trained_covariance_type: diag
+  trained_n_iter: 80
+  trained_random_state: 42
+  trained_min_covar: 0.0001
+h8_probability_allocation:
+  holding_horizon_bars:
+    - 1
+  allocation_methods:
+    - edge
+    - confidence_edge
+    - dominant_probability
+  min_abs_positions:
+    - 0.0
+    - 0.10
+    - 0.15
+    - 0.20
+    - 0.30
+  max_entropy_values:
+    - null
+    - 0.75
+  smoothing_alphas:
+    - 1.0
+    - 0.50
+    - 0.25
+  rebalance_thresholds:
+    - 0.0
+    - 0.05
+    - 0.10
+    - 0.20
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+  min_validation_turnover: 25.0
+  min_positive_fold_share: 0.67
+  min_daily_sharpe: 0.75
+  min_net_per_turnover_bps: 1.0
+candidate_cost_sensitivity_cross_asset:
+  cost_bps:
+    - 1.0
+    - 2.0
+    - 5.0
+    - 7.5
+    - 10.0
+  ibkr:
+    enabled: true
+    plans:
+      - tiered
+      - fixed
+    notionals_usd:
+      - 5000
+      - 10000
+      - 25000
+    spread_slippage_bps_round_trip: 1.5
+    tiered_commission_per_share_usd: 0.0035
+    tiered_min_commission_per_order_usd: 0.35
+    tiered_clearing_per_share_per_side_usd: 0.0002
+    fixed_commission_per_share_usd: 0.005
+    fixed_min_commission_per_order_usd: 1.0
+    max_commission_pct_trade_value: 0.01
+    sec_fee_rate_on_sell: 0.0000206
+    finra_taf_per_share_on_sell_usd: 0.000195
+    finra_taf_cap_usd: 9.79

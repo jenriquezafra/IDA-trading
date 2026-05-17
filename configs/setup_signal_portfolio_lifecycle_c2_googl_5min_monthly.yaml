@@ -1,0 +1,89 @@
+candidate:
+  candidate_id: C2
+  hypothesis_id: H9
+  role: primary_single_name
+  status: frozen_validation_candidate
+project:
+  name: ida-trading
+  timezone: America/New_York
+  frequency: 5min
+lab:
+  target_symbol: GOOGL
+  timeframe: 5min
+  universe_id: core_cross_asset_v1
+paths:
+  features_dir: data/features
+  results_dir: results/candidates/C2/googl_5min_24_6_6_step1
+  reports_dir: reports/candidates/C2/googl_5min_24_6_6_step1
+hmm_lab:
+  feature_set_version: cross_asset_v1
+  features_config: configs/features/cross_asset_v1.yaml
+  max_folds: 40
+  walk_forward:
+    train_months: 24
+    validation_months: 6
+    test_months: 6
+    step_months: 1
+setup_signal_search:
+  horizons: [12, 24]
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+setup_signal_portfolio_lifecycle:
+  targets: [GOOGL]
+  results_dir: results/candidates/C2/googl_5min_24_6_6_step1/lifecycle
+  reports_dir: reports/candidates/C2/googl_5min_24_6_6_step1/lifecycle
+  primary_cost_scenario: ibkr_tiered_10000
+  stress_cost_scenario: bps_5
+  cost_scenarios:
+    - ibkr_tiered_5000
+    - ibkr_tiered_10000
+    - ibkr_tiered_25000
+    - ibkr_fixed_5000
+    - ibkr_fixed_10000
+    - ibkr_fixed_25000
+    - bps_1
+    - bps_2
+    - bps_5
+  min_positive_targets: 1
+  min_stress_nonnegative_targets: 1
+  min_primary_net_per_turnover_bps: 0.0
+  max_primary_drawdown: 0.10
+  report_top_rows: 60
+  include_base_control: false
+  rule:
+    name: ob60_long_refined_h24_tp100
+    family: opening_bias_followthrough
+    direction: long
+    params:
+      bias_attempts_min: 1
+      rel_volume_min: 1.25
+      close_location_min: 0.65
+      vwap_floor: 0.0
+      vwap_ceiling: 0.50
+      dist_open_min: 0.0
+      min_minutes_from_open: 60
+      min_minutes_to_close: 45
+  exit_grid:
+    max_hold_bars: [24]
+    min_hold_bars: [1]
+    stop_loss_bps: [0]
+    take_profit_bps: [100]
+    exit_on_signal_loss: [false]
+    cooldown_bars: [0]
+candidate_cost_sensitivity_cross_asset:
+  cost_bps: [1.0, 2.0, 5.0]
+  ibkr:
+    enabled: true
+    plans: [tiered, fixed]
+    notionals_usd: [5000, 10000, 25000]
+    spread_slippage_bps_round_trip: 1.5
+    tiered_commission_per_share_usd: 0.0035
+    tiered_min_commission_per_order_usd: 0.35
+    tiered_clearing_per_share_per_side_usd: 0.0002
+    fixed_commission_per_share_usd: 0.005
+    fixed_min_commission_per_order_usd: 1.0
+    max_commission_pct_trade_value: 0.01
+    sec_fee_rate_on_sell: 0.0000206
+    finra_taf_per_share_on_sell_usd: 0.000195
+    finra_taf_cap_usd: 9.79

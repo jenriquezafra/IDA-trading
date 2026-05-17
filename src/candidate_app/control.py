@@ -1,0 +1,1091 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+import socket
+from typing import Any
+
+import pandas as pd
+import yaml
+
+from src.candidate_app.models import json_safe, utc_now
+from src.candidate_app.store import DEFAULT_DB_PATH, connect, list_paper_ledger_entries
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+@dataclass(frozen=True)
+class PaperCandidateSource:
+    candidate_id: str
+    name: str
+    strategy_id: str
+    mode: str
+    symbol: str
+    account: str | None
+    kill_switch_path: Path
+    daemon_status_path: Path
+    state_path: Path
+    state_events_path: Path
+    pnl_events_path: Path
+    auto_runner_dir: Path
+    config_path: Path | None = None
+    connection_config_path: Path | None = None
+    demo: bool = False
+
+
+ACTIVE_PAPER_SOURCES: tuple[PaperCandidateSource, ...] = (
+    PaperCandidateSource(
+        candidate_id="qqq-risk-off-credit-spread",
+        name="QQQ Risk-Off Credit Spread",
+        strategy_id="qqq_15min_risk_off_short_h1c_v1",
+        mode="paper",
+        symbol="QQQ",
+        account="DU9782002",
+        kill_switch_path=Path("ops/kill_switches/h1c_auto_paused"),
+        daemon_status_path=Path("results/paper/h1c_auto_runner/daemon_status.yaml"),
+        state_path=Path("results/paper/h1c_state/state.yaml"),
+        state_events_path=Path("results/paper/h1c_state/events.parquet"),
+        pnl_events_path=Path("results/paper/h1c_state/pnl_events.parquet"),
+        auto_runner_dir=Path("results/paper/h1c_auto_runner"),
+        config_path=Path("configs/execution/h1c_auto_runner.yaml"),
+        connection_config_path=Path("configs/execution/ibkr_paper_readonly.yaml"),
+    ),
+    PaperCandidateSource(
+        candidate_id="ko-defensive-paper-demo",
+        name="KO Defensive Mean Reversion",
+        strategy_id="ko_daily_defensive_reversion_demo_v1",
+        mode="paper",
+        symbol="KO",
+        account="DEMO-PAPER",
+        kill_switch_path=Path("ops/kill_switches/ko_demo_paused"),
+        daemon_status_path=Path("results/paper/ko_demo/daemon_status.yaml"),
+        state_path=Path("results/paper/ko_demo/state.yaml"),
+        state_events_path=Path("results/paper/ko_demo/events.parquet"),
+        pnl_events_path=Path("results/paper/ko_demo/pnl_events.parquet"),
+        auto_runner_dir=Path("results/paper/ko_demo/runs"),
+        demo=True,
+    ),
+)
+
+LIVE_SOURCES: tuple[PaperCandidateSource, ...] = ()
+
+
+def resolve_workspace_path(path: str | Path, root: str | Path = PROJECT_ROOT) -> Path:
+    root_path = Path(root).resolve()
+    raw = Path(path)
+    resolved = raw.resolve() if raw.is_absolute() else (root_path / raw).resolve()
+    try:
+        resolved.relative_to(root_path)
+    except ValueError as exc:
+        raise ValueError(f"path is outside workspace: {path}") from exc
+    return resolved
+
+
+def workspace_relpath(path: str | Path, root: str | Path = PROJECT_ROOT) -> str:
+    resolved = Path(path).resolve()
+    try:
+        return resolved.relative_to(Path(root).resolve()).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
+def read_yaml(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        return {"_read_error": str(exc)}
+    return raw if isinstance(raw, dict) else {}
+
+
+def read_parquet(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_parquet(path)
+    except Exception:
+        return pd.DataFrame()
+
+
+def frame_records(frame: pd.DataFrame, *, limit: int | None = None, ascending: bool = False) -> list[dict[str, Any]]:
+    if frame.empty:
+        return []
+    output = frame.copy()
+    sort_column = "created_at_utc" if "created_at_utc" in output.columns else None
+    if sort_column:
+        output = output.sort_values(sort_column, ascending=ascending, kind="stable")
+    if limit is not None:
+        output = output.head(limit)
+    return json_safe(output.to_dict(orient="records"))
+
+
+def parse_dt(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        text = str(value).replace("Z", "+00:00")
+        return datetime.fromisoformat(text).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def source_for(candidate_id: str) -> PaperCandidateSource:
+    for source in (*ACTIVE_PAPER_SOURCES, *LIVE_SOURCES):
+        if source.candidate_id == candidate_id:
+            return source
+    raise KeyError(candidate_id)
+
+
+def sources_for_mode(mode: str) -> tuple[PaperCandidateSource, ...]:
+    if mode == "paper":
+        return ACTIVE_PAPER_SOURCES
+    if mode == "live":
+        return LIVE_SOURCES
+    return ()
+
+
+def read_runtime_control(
+    source: PaperCandidateSource,
+    *,
+    db_path: str | Path = DEFAULT_DB_PATH,
+    kill_switch_exists: bool | None = None,
+    root: str | Path = PROJECT_ROOT,
+) -> dict[str, Any]:
+    conn = connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            select * from strategy_runtime_controls
+            where candidate_id = ? and mode = ?
+            """,
+            (source.candidate_id, source.mode),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is not None:
+        record = dict(row)
+        record["enabled"] = bool(record["enabled"])
+        return json_safe(record)
+
+    enabled = True if kill_switch_exists is None else not kill_switch_exists
+    config = read_yaml(resolve_workspace_path(source.config_path, root)) if source.config_path else {}
+    auto = dict(config.get("auto", {}) or {})
+    sizing_mode = str(auto.get("sizing_mode") or "buying_power_fraction")
+    if auto.get("max_order_notional_usd") not in {None, ""}:
+        capital_mode = "absolute_usd"
+        capital_value = float(auto.get("max_order_notional_usd") or 0.0)
+        capital_basis = "max_order_notional_usd"
+    elif sizing_mode in {"buying_power_fraction", "available_funds_fraction"}:
+        capital_mode = "net_fraction"
+        capital_value = float(auto.get("capital_fraction", 1.0) or 1.0)
+        capital_basis = sizing_mode
+    else:
+        capital_mode = "net_fraction"
+        capital_value = 1.0
+        capital_basis = "ticket_quantity"
+    return {
+        "candidate_id": source.candidate_id,
+        "mode": source.mode,
+        "enabled": enabled,
+        "capital_mode": capital_mode,
+        "capital_value": capital_value,
+        "capital_basis": capital_basis,
+        "updated_at": None,
+        "updated_by": "config",
+        "notes": "",
+    }
+
+
+def save_runtime_control(
+    source: PaperCandidateSource,
+    *,
+    enabled: bool,
+    capital_mode: str,
+    capital_value: float,
+    capital_basis: str = "buying_power_fraction",
+    actor: str = "dashboard",
+    notes: str = "",
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> dict[str, Any]:
+    if capital_mode not in {"net_fraction", "absolute_usd"}:
+        raise ValueError(f"unsupported capital_mode: {capital_mode}")
+    if capital_mode == "net_fraction" and not 0 < capital_value <= 1:
+        raise ValueError("net_fraction capital_value must be in (0, 1]")
+    if capital_mode == "absolute_usd" and capital_value <= 0:
+        raise ValueError("absolute_usd capital_value must be positive")
+    if capital_basis not in {"buying_power_fraction", "available_funds_fraction", "max_order_notional_usd"}:
+        raise ValueError(f"unsupported capital_basis: {capital_basis}")
+
+    conn = connect(db_path)
+    try:
+        conn.execute(
+            """
+            insert into strategy_runtime_controls(
+              candidate_id, mode, enabled, capital_mode, capital_value,
+              capital_basis, updated_at, updated_by, notes
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(candidate_id, mode) do update set
+              enabled=excluded.enabled,
+              capital_mode=excluded.capital_mode,
+              capital_value=excluded.capital_value,
+              capital_basis=excluded.capital_basis,
+              updated_at=excluded.updated_at,
+              updated_by=excluded.updated_by,
+              notes=excluded.notes
+            """,
+            (
+                source.candidate_id,
+                source.mode,
+                int(enabled),
+                capital_mode,
+                float(capital_value),
+                capital_basis,
+                utc_now(),
+                actor,
+                notes,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return read_runtime_control(source, db_path=db_path)
+
+
+def list_manual_ledger(source: PaperCandidateSource, *, db_path: str | Path = DEFAULT_DB_PATH) -> list[dict[str, Any]]:
+    conn = connect(db_path)
+    try:
+        return list_paper_ledger_entries(conn, source.candidate_id)
+    finally:
+        conn.close()
+
+
+def curve_from_manual_ledger(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cumulative = 0.0
+    curve: list[dict[str, Any]] = []
+    for entry in sorted(entries, key=lambda row: str(row.get("event_at") or "")):
+        raw = entry.get("net_pnl")
+        if raw is None:
+            continue
+        value = float(raw)
+        cumulative += value
+        curve.append(
+            {
+                "timestamp": entry.get("event_at"),
+                "event_type": entry.get("event_type"),
+                "realized_pnl": value,
+                "cumulative_realized_pnl": round(cumulative, 6),
+                "quantity": entry.get("quantity"),
+                "entry_price": entry.get("price"),
+                "exit_price": None,
+            }
+        )
+    return curve
+
+
+def normalize_ledger_events(
+    *,
+    artifact_events: list[dict[str, Any]],
+    manual_entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for event in artifact_events:
+        rows.append(
+            {
+                "event_at": event.get("created_at_utc") or event.get("event_at"),
+                "source": "runner_pnl_events",
+                "event_type": event.get("event_type"),
+                "strategy_run_id": event.get("strategy_run_id"),
+                "symbol": event.get("symbol"),
+                "side": event.get("side"),
+                "quantity": event.get("quantity"),
+                "price": event.get("exit_price") or event.get("entry_price") or event.get("price"),
+                "net_pnl": event.get("realized_pnl"),
+                "gross_pnl": event.get("gross_pnl"),
+                "fees": event.get("fees"),
+                "slippage_bps": event.get("slippage_bps"),
+                "exposure": event.get("exposure"),
+                "notes": event.get("notes") or "",
+            }
+        )
+    for entry in manual_entries:
+        rows.append(
+            {
+                "event_at": entry.get("event_at"),
+                "source": "manual_ledger",
+                "event_type": entry.get("event_type"),
+                "strategy_run_id": entry.get("strategy_run_id"),
+                "symbol": entry.get("symbol"),
+                "side": entry.get("side"),
+                "quantity": entry.get("quantity"),
+                "price": entry.get("price"),
+                "net_pnl": entry.get("net_pnl"),
+                "gross_pnl": entry.get("gross_pnl"),
+                "fees": entry.get("fees"),
+                "slippage_bps": entry.get("slippage_bps"),
+                "exposure": entry.get("exposure"),
+                "notes": entry.get("notes") or "",
+            }
+        )
+    return json_safe(sorted(rows, key=lambda row: str(row.get("event_at") or ""), reverse=True))
+
+
+def apply_capital_policy_to_config(
+    source: PaperCandidateSource,
+    control: dict[str, Any],
+    *,
+    root: str | Path = PROJECT_ROOT,
+) -> dict[str, Any]:
+    if not source.config_path:
+        return {"applied": False, "reason": "source has no config_path"}
+    config_path = resolve_workspace_path(source.config_path, root)
+    config = read_yaml(config_path)
+    if "_read_error" in config:
+        return {"applied": False, "reason": config["_read_error"]}
+    auto = dict(config.get("auto", {}) or {})
+    if control["capital_mode"] == "net_fraction":
+        auto["sizing_mode"] = control.get("capital_basis") if control.get("capital_basis") in {"buying_power_fraction", "available_funds_fraction"} else "buying_power_fraction"
+        auto["capital_fraction"] = float(control["capital_value"])
+        auto["max_order_notional_usd"] = None
+    else:
+        auto["max_order_notional_usd"] = float(control["capital_value"])
+    config["auto"] = auto
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    return {"applied": True, "config_path": workspace_relpath(config_path, root)}
+
+
+def manifest_summary(manifest_path: Path, root: Path) -> dict[str, Any]:
+    manifest = read_yaml(manifest_path)
+    run = dict(manifest.get("run", {}) or {})
+    config = dict(manifest.get("config", {}) or {})
+    ticket = dict(manifest.get("signal", {}).get("ticket", {}) or {})
+    raw_ticket = dict(manifest.get("signal", {}).get("raw_ticket", {}) or {})
+    active_ticket = ticket or raw_ticket
+    pre_recon = dict(manifest.get("pre_trade_reconciliation", {}) or {})
+    post_recon = dict(manifest.get("post_execution_reconciliation", {}) or {})
+    plan = dict(manifest.get("order_plan", {}).get("summary", {}) or {})
+    execution = dict(manifest.get("execution", {}).get("summary", {}) or {})
+    state = dict(manifest.get("state", {}).get("state", {}) or {})
+    return json_safe(
+        {
+            "created_at_utc": run.get("created_at_utc"),
+            "status": run.get("status"),
+            "strategy_id": config.get("strategy_id") or active_ticket.get("strategy_id"),
+            "decision": manifest.get("decision"),
+            "reason": manifest.get("reason"),
+            "market_open": manifest.get("market", {}).get("open"),
+            "signal_timestamp": active_ticket.get("signal_timestamp"),
+            "signal_action": active_ticket.get("action"),
+            "ticket_quantity": active_ticket.get("quantity"),
+            "ticket_status": active_ticket.get("status"),
+            "pre_trade_reconciliation": pre_recon.get("decision"),
+            "pre_trade_severity": pre_recon.get("severity"),
+            "post_execution_reconciliation": post_recon.get("decision"),
+            "post_execution_severity": post_recon.get("severity"),
+            "funds_ok": manifest.get("funds", {}).get("ok"),
+            "entry_safety_ok": manifest.get("entry_safety", {}).get("ok"),
+            "order_plan_decision": plan.get("decision"),
+            "planned_orders": plan.get("planned_orders", 0),
+            "submitted_orders": execution.get("submitted_orders", 0),
+            "state_status": state.get("status"),
+            "latency_seconds": manifest.get("latency", {}).get("total_seconds"),
+            "run_dir": workspace_relpath(manifest_path.parent, root),
+            "manifest_path": workspace_relpath(manifest_path, root),
+        }
+    )
+
+
+def list_auto_runs(source: PaperCandidateSource, root: str | Path = PROJECT_ROOT, *, limit: int = 80) -> list[dict[str, Any]]:
+    root_path = Path(root).resolve()
+    runner_dir = resolve_workspace_path(source.auto_runner_dir, root_path)
+    if not runner_dir.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for manifest_path in runner_dir.glob("*/manifest.yaml"):
+        row = manifest_summary(manifest_path, root_path)
+        if row.get("strategy_id") == source.strategy_id:
+            rows.append(row)
+    rows = sorted(rows, key=lambda row: str(row.get("created_at_utc") or ""), reverse=True)
+    return rows[:limit]
+
+
+def demo_ko_daemon() -> dict[str, Any]:
+    return {
+        "available": True,
+        "status": "running",
+        "error_streak": 0,
+        "scheduler": {
+            "market_open": False,
+            "reason": "waiting for next US cash session",
+            "next_open_utc": "2026-05-18T13:30:00Z",
+        },
+        "mtime_utc": "2026-05-17T10:00:00Z",
+        "path": "demo://ko/daemon",
+    }
+
+
+def demo_ko_state() -> dict[str, Any]:
+    return {
+        "available": True,
+        "strategy_id": "ko_daily_defensive_reversion_demo_v1",
+        "status": "long",
+        "symbol": "KO",
+        "quantity": 90,
+        "desired_position_unit": 1.0,
+        "position_unit": 1.0,
+        "avg_entry_price": 62.4,
+        "path": "demo://ko/state",
+    }
+
+
+def demo_ko_runs() -> list[dict[str, Any]]:
+    rows = [
+        ("2026-05-15T20:05:00Z", "hold", "price above stop, signal remains constructive", "hold", 90, 0, 0, "ok"),
+        ("2026-05-08T20:05:00Z", "accepted", "pullback into defensive support band", "buy", 90, 1, 1, "ok"),
+        ("2026-04-24T20:05:00Z", "accepted", "mean reversion target reached", "sell", 80, 1, 1, "ok"),
+        ("2026-04-03T20:05:00Z", "hold", "dividend defensive basket still in regime", "hold", 80, 0, 0, "ok"),
+        ("2026-03-06T20:05:00Z", "accepted", "oversold staple rotation entry", "buy", 80, 1, 1, "ok"),
+    ]
+    return [
+        {
+            "created_at_utc": created_at,
+            "status": "ok",
+            "strategy_id": "ko_daily_defensive_reversion_demo_v1",
+            "decision": decision,
+            "reason": reason,
+            "market_open": False,
+            "signal_timestamp": created_at,
+            "signal_action": action,
+            "ticket_quantity": quantity,
+            "ticket_status": "demo",
+            "pre_trade_reconciliation": recon,
+            "pre_trade_severity": "info",
+            "post_execution_reconciliation": recon,
+            "post_execution_severity": "info",
+            "funds_ok": True,
+            "entry_safety_ok": True,
+            "order_plan_decision": "submit" if submitted_orders else "noop",
+            "planned_orders": planned_orders,
+            "submitted_orders": submitted_orders,
+            "state_status": "long",
+            "latency_seconds": 1.2,
+            "run_dir": "demo://ko/runs",
+            "manifest_path": "demo://ko/manifest",
+        }
+        for created_at, decision, reason, action, quantity, planned_orders, submitted_orders, recon in rows
+    ]
+
+
+def demo_ko_state_events() -> list[dict[str, Any]]:
+    return [
+        {
+            "created_at_utc": "2026-05-15T20:05:00Z",
+            "event_type": "hold",
+            "strategy_id": "ko_daily_defensive_reversion_demo_v1",
+            "account": "DEMO-PAPER",
+            "symbol": "KO",
+            "previous_status": "long",
+            "new_status": "long",
+            "ticket_action": "hold",
+            "ticket_quantity": 90,
+            "desired_position_unit": 1.0,
+            "position_unit": 1.0,
+            "state_updated": False,
+        },
+        {
+            "created_at_utc": "2026-05-08T20:05:00Z",
+            "event_type": "fill",
+            "strategy_id": "ko_daily_defensive_reversion_demo_v1",
+            "account": "DEMO-PAPER",
+            "symbol": "KO",
+            "previous_status": "flat",
+            "new_status": "long",
+            "ticket_action": "buy",
+            "ticket_quantity": 90,
+            "desired_position_unit": 1.0,
+            "position_unit": 1.0,
+            "state_updated": True,
+        },
+        {
+            "created_at_utc": "2026-04-24T20:05:00Z",
+            "event_type": "fill",
+            "strategy_id": "ko_daily_defensive_reversion_demo_v1",
+            "account": "DEMO-PAPER",
+            "symbol": "KO",
+            "previous_status": "long",
+            "new_status": "flat",
+            "ticket_action": "sell",
+            "ticket_quantity": 80,
+            "desired_position_unit": 0.0,
+            "position_unit": 0.0,
+            "state_updated": True,
+        },
+        {
+            "created_at_utc": "2026-04-03T20:05:00Z",
+            "event_type": "hold",
+            "strategy_id": "ko_daily_defensive_reversion_demo_v1",
+            "account": "DEMO-PAPER",
+            "symbol": "KO",
+            "previous_status": "long",
+            "new_status": "long",
+            "ticket_action": "hold",
+            "ticket_quantity": 80,
+            "desired_position_unit": 1.0,
+            "position_unit": 1.0,
+            "state_updated": False,
+        },
+        {
+            "created_at_utc": "2026-03-06T20:05:00Z",
+            "event_type": "fill",
+            "strategy_id": "ko_daily_defensive_reversion_demo_v1",
+            "account": "DEMO-PAPER",
+            "symbol": "KO",
+            "previous_status": "flat",
+            "new_status": "long",
+            "ticket_action": "buy",
+            "ticket_quantity": 80,
+            "desired_position_unit": 1.0,
+            "position_unit": 1.0,
+            "state_updated": True,
+        },
+    ]
+
+
+def demo_ko_market_series() -> list[dict[str, Any]]:
+    prices = [
+        ("2026-03-02", 60.20),
+        ("2026-03-06", 59.40),
+        ("2026-03-13", 60.10),
+        ("2026-03-20", 61.35),
+        ("2026-03-27", 62.05),
+        ("2026-04-03", 62.50),
+        ("2026-04-10", 63.15),
+        ("2026-04-17", 64.05),
+        ("2026-04-24", 65.10),
+        ("2026-05-01", 63.70),
+        ("2026-05-08", 62.40),
+        ("2026-05-15", 64.20),
+    ]
+    actions = {
+        "2026-03-06": {"action": "buy", "quantity": 80, "label": "BUY 80"},
+        "2026-04-03": {"action": "hold", "quantity": 80, "label": "HOLD"},
+        "2026-04-24": {"action": "sell", "quantity": 80, "label": "SELL 80"},
+        "2026-05-08": {"action": "buy", "quantity": 90, "label": "BUY 90"},
+        "2026-05-15": {"action": "hold", "quantity": 90, "label": "HOLD"},
+    }
+    return [
+        {
+            "timestamp": f"{date}T20:00:00Z",
+            "date": date,
+            "close": close,
+            "marker": actions.get(date),
+        }
+        for date, close in prices
+    ]
+
+
+def market_snapshot(source: PaperCandidateSource, ledger_events: list[dict[str, Any]]) -> dict[str, Any]:
+    if source.demo and source.symbol == "KO":
+        return {
+            "symbol": "KO",
+            "source": "demo_price_series",
+            "series": demo_ko_market_series(),
+        }
+    return {
+        "symbol": source.symbol,
+        "source": "not_configured",
+        "series": [],
+    }
+
+
+def pnl_curve_from_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cumulative = 0.0
+    curve: list[dict[str, Any]] = []
+    for event in sorted(events, key=lambda row: str(row.get("created_at_utc") or "")):
+        raw = event.get("realized_pnl")
+        if raw is None:
+            continue
+        value = float(raw)
+        cumulative += value
+        curve.append(
+            {
+                "timestamp": event.get("created_at_utc"),
+                "event_type": event.get("event_type"),
+                "realized_pnl": value,
+                "cumulative_realized_pnl": round(cumulative, 6),
+                "quantity": event.get("quantity"),
+                "entry_price": event.get("entry_price"),
+                "exit_price": event.get("exit_price"),
+            }
+        )
+    return curve
+
+
+def pnl_metrics(curve: list[dict[str, Any]]) -> dict[str, Any]:
+    if not curve:
+        return {
+            "realized_pnl": 0.0,
+            "event_count": 0,
+            "winning_events": 0,
+            "losing_events": 0,
+            "win_rate": None,
+            "max_drawdown": 0.0,
+        }
+    values = [float(row["realized_pnl"]) for row in curve]
+    high = 0.0
+    max_drawdown = 0.0
+    for row in curve:
+        value = float(row["cumulative_realized_pnl"])
+        high = max(high, value)
+        max_drawdown = min(max_drawdown, value - high)
+    wins = sum(1 for value in values if value > 0)
+    losses = sum(1 for value in values if value < 0)
+    return {
+        "realized_pnl": round(float(curve[-1]["cumulative_realized_pnl"]), 6),
+        "event_count": len(values),
+        "winning_events": wins,
+        "losing_events": losses,
+        "win_rate": round(wins / len(values), 6) if values else None,
+        "max_drawdown": round(max_drawdown, 6),
+    }
+
+
+def build_alerts(
+    *,
+    source: PaperCandidateSource,
+    kill_switch_exists: bool,
+    daemon: dict[str, Any],
+    state: dict[str, Any],
+    latest_run: dict[str, Any] | None,
+    pnl_log_available: bool,
+) -> list[dict[str, Any]]:
+    alerts: list[dict[str, Any]] = []
+    if kill_switch_exists:
+        alerts.append(
+            {
+                "severity": "critical",
+                "code": "KILL_SWITCH_ACTIVE",
+                "title": "Automation paused",
+                "message": f"Kill switch exists at {source.kill_switch_path.as_posix()}.",
+            }
+        )
+    if not daemon.get("available"):
+        alerts.append(
+            {
+                "severity": "warning",
+                "code": "DAEMON_STATUS_MISSING",
+                "title": "Daemon status unavailable",
+                "message": "No daemon status file was found for this candidate.",
+            }
+        )
+    elif int(daemon.get("error_streak") or 0) > 0:
+        alerts.append(
+            {
+                "severity": "critical",
+                "code": "DAEMON_ERRORS",
+                "title": "Daemon error streak",
+                "message": f"Daemon error streak is {daemon.get('error_streak')}.",
+            }
+        )
+    if latest_run:
+        decision = str(latest_run.get("decision") or "")
+        if decision.startswith("blocked"):
+            alerts.append(
+                {
+                    "severity": "critical",
+                    "code": "RUN_BLOCKED",
+                    "title": "Latest run blocked",
+                    "message": latest_run.get("reason") or decision,
+                }
+            )
+        if latest_run.get("pre_trade_severity") == "block" or latest_run.get("post_execution_severity") == "block":
+            alerts.append(
+                {
+                    "severity": "critical",
+                    "code": "RECONCILIATION_BLOCK",
+                    "title": "Reconciliation block",
+                    "message": "The latest run reported a reconciliation block.",
+                }
+            )
+    if state.get("available") and state.get("status") not in {None, "flat"}:
+        alerts.append(
+            {
+                "severity": "warning",
+                "code": "OPEN_STATE",
+                "title": "State is not flat",
+                "message": f"Current state is {state.get('status')} with quantity {state.get('quantity')}.",
+            }
+        )
+    if not pnl_log_available:
+        alerts.append(
+            {
+                "severity": "info",
+                "code": "PNL_LOG_MISSING",
+                "title": "No paper PnL log yet",
+                "message": "No realized PnL parquet exists for this candidate yet.",
+            }
+        )
+    if not alerts:
+        alerts.append(
+            {
+                "severity": "ok",
+                "code": "NO_ACTIVE_ALERTS",
+                "title": "No active alerts",
+                "message": "No operational alerts are active for this candidate.",
+            }
+        )
+    return alerts
+
+
+def overall_state(alerts: list[dict[str, Any]], daemon: dict[str, Any]) -> str:
+    severities = {alert["severity"] for alert in alerts}
+    if "critical" in severities:
+        return "blocked"
+    if "warning" in severities:
+        return "attention"
+    scheduler = dict(daemon.get("scheduler", {}) or {})
+    if scheduler.get("market_open") is False:
+        return "waiting"
+    return "running"
+
+
+def tcp_check(host: str, port: int, timeout_seconds: float = 1.0) -> dict[str, Any]:
+    started = datetime.now(timezone.utc)
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout_seconds):
+            latency_ms = (datetime.now(timezone.utc) - started).total_seconds() * 1000
+            return {"ok": True, "latency_ms": round(latency_ms, 2), "error": None}
+    except Exception as exc:
+        latency_ms = (datetime.now(timezone.utc) - started).total_seconds() * 1000
+        return {"ok": False, "latency_ms": round(latency_ms, 2), "error": str(exc)}
+
+
+def connection_snapshot(*, root: str | Path = PROJECT_ROOT) -> dict[str, Any]:
+    root_path = Path(root).resolve()
+    checks: list[dict[str, Any]] = []
+    for source in (*ACTIVE_PAPER_SOURCES, *LIVE_SOURCES):
+        if not source.connection_config_path:
+            continue
+        config_path = resolve_workspace_path(source.connection_config_path, root_path)
+        config = read_yaml(config_path)
+        connection = dict(config.get("connection", {}) or {})
+        host = str(connection.get("host") or "127.0.0.1")
+        port = int(connection.get("port") or 0)
+        timeout = min(float(connection.get("timeout_seconds") or 2.0), 2.0)
+        result = tcp_check(host, port, timeout_seconds=timeout) if port else {"ok": False, "latency_ms": None, "error": "missing port"}
+        checks.append(
+            {
+                "id": f"{source.candidate_id}:ibkr",
+                "candidate_id": source.candidate_id,
+                "mode": source.mode,
+                "name": "IBKR paper gateway",
+                "host": host,
+                "port": port,
+                "trading_mode": connection.get("trading_mode"),
+                "expected_account": connection.get("expected_account"),
+                "config_path": workspace_relpath(config_path, root_path),
+                **result,
+            }
+        )
+
+    daemon_checks = []
+    for source in (*ACTIVE_PAPER_SOURCES, *LIVE_SOURCES):
+        if source.demo:
+            daemon_checks.append(
+                {
+                    "id": f"{source.candidate_id}:daemon_file",
+                    "candidate_id": source.candidate_id,
+                    "mode": source.mode,
+                    "name": "Demo daemon status",
+                    "ok": True,
+                    "path": "demo://ko/daemon",
+                    "mtime_utc": "2026-05-17T10:00:00Z",
+                    "error": None,
+                }
+            )
+            continue
+        daemon_path = resolve_workspace_path(source.daemon_status_path, root_path)
+        available = daemon_path.exists()
+        mtime = (
+            datetime.fromtimestamp(daemon_path.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            if available
+            else None
+        )
+        daemon_checks.append(
+            {
+                "id": f"{source.candidate_id}:daemon_file",
+                "candidate_id": source.candidate_id,
+                "mode": source.mode,
+                "name": "Daemon status file",
+                "ok": available,
+                "path": source.daemon_status_path.as_posix(),
+                "mtime_utc": mtime,
+                "error": None if available else "missing daemon status file",
+            }
+        )
+
+    all_checks = checks + daemon_checks
+    ok_count = sum(1 for check in all_checks if check.get("ok"))
+    return {
+        "status": "ok" if ok_count == len(all_checks) and all_checks else "degraded",
+        "ok_count": ok_count,
+        "check_count": len(all_checks),
+        "checks": all_checks,
+        "updated_at_utc": utc_now(),
+    }
+
+
+def candidate_control_snapshot(
+    candidate_id: str,
+    *,
+    root: str | Path = PROJECT_ROOT,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> dict[str, Any]:
+    source = source_for(candidate_id)
+    root_path = Path(root).resolve()
+    kill_switch_path = resolve_workspace_path(source.kill_switch_path, root_path)
+    daemon_path = resolve_workspace_path(source.daemon_status_path, root_path)
+    state_path = resolve_workspace_path(source.state_path, root_path)
+    state_events_path = resolve_workspace_path(source.state_events_path, root_path)
+    pnl_events_path = resolve_workspace_path(source.pnl_events_path, root_path)
+
+    daemon = read_yaml(daemon_path)
+    if daemon:
+        daemon["available"] = "_read_error" not in daemon
+        daemon["path"] = workspace_relpath(daemon_path, root_path)
+        if daemon_path.exists():
+            daemon["mtime_utc"] = (
+                datetime.fromtimestamp(daemon_path.stat().st_mtime, tz=timezone.utc)
+                .replace(microsecond=0)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+    else:
+        daemon = {"available": False, "path": workspace_relpath(daemon_path, root_path)}
+    if source.demo and not daemon.get("available"):
+        daemon = demo_ko_daemon()
+
+    state = read_yaml(state_path)
+    if state:
+        state["available"] = "_read_error" not in state
+        state["path"] = workspace_relpath(state_path, root_path)
+    else:
+        state = {"available": False, "path": workspace_relpath(state_path, root_path)}
+    if source.demo and not state.get("available"):
+        state = demo_ko_state()
+
+    runs = list_auto_runs(source, root_path)
+    if source.demo and not runs:
+        runs = demo_ko_runs()
+    state_event_frame = read_parquet(state_events_path)
+    state_event_columns = [
+        column
+        for column in [
+            "created_at_utc",
+            "event_type",
+            "strategy_id",
+            "account",
+            "symbol",
+            "previous_status",
+            "new_status",
+            "signal_timestamp",
+            "ticket_action",
+            "ticket_quantity",
+            "desired_position_unit",
+            "position_unit",
+            "state_updated",
+        ]
+        if column in state_event_frame.columns
+    ]
+    if state_event_columns:
+        state_event_frame = state_event_frame.loc[:, state_event_columns]
+    state_events = frame_records(state_event_frame, limit=80)
+    if source.demo and not state_events:
+        state_events = demo_ko_state_events()
+    pnl_event_frame = read_parquet(pnl_events_path)
+    pnl_events = frame_records(pnl_event_frame, limit=200, ascending=True)
+    curve = pnl_curve_from_events(pnl_events)
+    manual_ledger = list_manual_ledger(source, db_path=db_path)
+    manual_curve = curve_from_manual_ledger(manual_ledger)
+    primary_curve = curve or manual_curve
+    ledger_rows = normalize_ledger_events(artifact_events=pnl_events, manual_entries=manual_ledger)
+    latest_run = runs[0] if runs else None
+    kill_switch_exists = kill_switch_path.exists()
+    runtime_control = read_runtime_control(source, db_path=db_path, kill_switch_exists=kill_switch_exists, root=root_path)
+    alerts = build_alerts(
+        source=source,
+        kill_switch_exists=kill_switch_exists,
+        daemon=daemon,
+        state=state,
+        latest_run=latest_run,
+        pnl_log_available=pnl_events_path.exists() or bool(manual_ledger),
+    )
+
+    return {
+        "candidate_id": source.candidate_id,
+        "name": source.name,
+        "strategy_id": source.strategy_id,
+        "mode": source.mode,
+        "symbol": source.symbol,
+        "account": source.account,
+        "overall_state": overall_state(alerts, daemon),
+        "control": {
+            "kill_switch_exists": kill_switch_exists,
+            "kill_switch_path": source.kill_switch_path.as_posix(),
+            "pause_enabled": not kill_switch_exists,
+            "resume_enabled": kill_switch_exists,
+            "runtime": runtime_control,
+            "effective_enabled": bool(runtime_control.get("enabled")) and not kill_switch_exists,
+        },
+        "daemon": json_safe(daemon),
+        "state": json_safe(state),
+        "latest_run": latest_run,
+        "recent_runs": runs,
+        "state_events": state_events,
+        "pnl": {
+            **pnl_metrics(primary_curve),
+            "source_available": pnl_events_path.exists() or bool(manual_ledger),
+            "source_type": "runner_pnl_events" if pnl_events_path.exists() else "manual_ledger",
+            "source_path": source.pnl_events_path.as_posix() if pnl_events_path.exists() else "candidate_paper_ledger",
+            "curve": primary_curve,
+            "events": pnl_events,
+        },
+        "ledger": {
+            "events": ledger_rows,
+            "manual_count": len(manual_ledger),
+            "artifact_count": len(pnl_events),
+        },
+        "market": market_snapshot(source, ledger_rows),
+        "alerts": alerts,
+        "updated_at_utc": utc_now(),
+    }
+
+
+def control_center_snapshot(
+    *,
+    root: str | Path = PROJECT_ROOT,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> dict[str, Any]:
+    candidates = [candidate_control_snapshot(source.candidate_id, root=root, db_path=db_path) for source in ACTIVE_PAPER_SOURCES]
+    live_candidates = [candidate_control_snapshot(source.candidate_id, root=root, db_path=db_path) for source in LIVE_SOURCES]
+    all_candidates = candidates + live_candidates
+    critical = sum(1 for candidate in all_candidates for alert in candidate["alerts"] if alert["severity"] == "critical")
+    warnings = sum(1 for candidate in all_candidates for alert in candidate["alerts"] if alert["severity"] == "warning")
+    paused = sum(1 for candidate in all_candidates if candidate["control"]["kill_switch_exists"])
+    return {
+        "title": "Paper/Live Control Center",
+        "active_candidates": all_candidates,
+        "sections": {
+            "paper": candidates,
+            "live": live_candidates,
+        },
+        "summary": {
+            "active_count": len(all_candidates),
+            "paper_count": len(candidates),
+            "live_count": len(live_candidates),
+            "paused_count": paused,
+            "critical_alerts": critical,
+            "warning_alerts": warnings,
+        },
+        "connection": connection_snapshot(root=root),
+        "updated_at_utc": utc_now(),
+    }
+
+
+def apply_control_action(
+    candidate_id: str,
+    *,
+    action: str,
+    reason: str = "",
+    actor: str = "dashboard",
+    root: str | Path = PROJECT_ROOT,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> dict[str, Any]:
+    source = source_for(candidate_id)
+    root_path = Path(root).resolve()
+    kill_switch_path = resolve_workspace_path(source.kill_switch_path, root_path)
+    action_normalized = action.strip().lower()
+    if action_normalized == "pause":
+        current = read_runtime_control(source, db_path=db_path, kill_switch_exists=True, root=root_path)
+        kill_switch_path.parent.mkdir(parents=True, exist_ok=True)
+        kill_switch_path.write_text(
+            yaml.safe_dump(
+                {
+                    "created_at_utc": utc_now(),
+                    "candidate_id": candidate_id,
+                    "strategy_id": source.strategy_id,
+                    "actor": actor,
+                    "reason": reason or "manual pause from candidate control center",
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        save_runtime_control(
+            source,
+            enabled=False,
+            capital_mode=current.get("capital_mode", "net_fraction"),
+            capital_value=float(current.get("capital_value", 1.0)),
+            capital_basis=current.get("capital_basis", "buying_power_fraction"),
+            actor=actor,
+            notes=reason,
+            db_path=db_path,
+        )
+    elif action_normalized == "resume":
+        if kill_switch_path.exists():
+            kill_switch_path.unlink()
+        current = read_runtime_control(source, db_path=db_path, kill_switch_exists=False, root=root_path)
+        save_runtime_control(
+            source,
+            enabled=True,
+            capital_mode=current.get("capital_mode", "net_fraction"),
+            capital_value=float(current.get("capital_value", 1.0)),
+            capital_basis=current.get("capital_basis", "buying_power_fraction"),
+            actor=actor,
+            notes=reason,
+            db_path=db_path,
+        )
+    else:
+        raise ValueError(f"unsupported control action: {action}")
+    return candidate_control_snapshot(candidate_id, root=root_path, db_path=db_path)
+
+
+def update_strategy_runtime_control(
+    candidate_id: str,
+    *,
+    enabled: bool,
+    capital_mode: str,
+    capital_value: float,
+    capital_basis: str = "buying_power_fraction",
+    actor: str = "dashboard",
+    notes: str = "",
+    apply_to_config: bool = False,
+    root: str | Path = PROJECT_ROOT,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> dict[str, Any]:
+    source = source_for(candidate_id)
+    root_path = Path(root).resolve()
+    current_kill_switch = resolve_workspace_path(source.kill_switch_path, root_path).exists()
+    control = save_runtime_control(
+        source,
+        enabled=enabled,
+        capital_mode=capital_mode,
+        capital_value=capital_value,
+        capital_basis=capital_basis,
+        actor=actor,
+        notes=notes,
+        db_path=db_path,
+    )
+    if enabled and current_kill_switch:
+        apply_control_action(candidate_id, action="resume", actor=actor, reason=notes, root=root_path, db_path=db_path)
+    if not enabled and not current_kill_switch:
+        apply_control_action(candidate_id, action="pause", actor=actor, reason=notes, root=root_path, db_path=db_path)
+    apply_result = {"applied": False, "reason": "not requested"}
+    if apply_to_config:
+        apply_result = apply_capital_policy_to_config(source, control, root=root_path)
+    snapshot = candidate_control_snapshot(candidate_id, root=root_path, db_path=db_path)
+    snapshot["capital_apply_result"] = apply_result
+    return snapshot

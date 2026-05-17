@@ -1,0 +1,564 @@
+project:
+  name: ida-trading
+  timezone: America/New_York
+  frequency: 5min
+
+lab:
+  target_symbol: SPY
+  target_profile: broad_market
+  timeframe: 5min
+  provider: polygon
+  start_date: "2021-05-01"
+  end_date: "2026-05-01"
+  universe_config: configs/universes/core_cross_asset.yaml
+  universe_id: core_cross_asset_v1
+  context_key: context_universe_core
+  benchmark_key: benchmark_universe
+  include_target_in_context: true
+  optional_symbols: []
+
+polygon:
+  api_key_env: POLYGON_API_KEY
+  source_interval: 5m
+  adjusted: true
+  default_years: 5
+
+paths:
+  raw_dir: data/raw/polygon
+  cleaned_dir: data/cleaned
+  aligned_dir: data/aligned
+  features_dir: data/features
+  models_dir: models
+  results_dir: results
+  metadata_dir: data/metadata
+  reports_dir: reports
+  data_coverage_dir: reports/data_coverage
+  alignment_dir: reports/alignment
+
+session:
+  market_open: "09:30"
+  market_close: "16:00"
+  timestamp_label: start
+  regular_session_only: true
+  drop_incomplete_sessions: true
+  expected_bars_per_session: 78
+
+calendar:
+  enabled: true
+  name: NYSE
+  drop_non_trading_days: true
+  drop_half_days: true
+
+quality:
+  drop_duplicate_timestamps: true
+  drop_critical_nan_rows: true
+  drop_invalid_price_rows: true
+  drop_negative_volume_rows: true
+  drop_extreme_range_rows: true
+  max_bar_range_bps: 1000.0
+
+labeling:
+  horizon_bars: 2
+  buffer_bps: 0.5
+  lambda_vol: 0.25
+  round_trip_cost_bps: 1.0
+
+backtest:
+  no_new_trades_after: "15:45"
+  force_flat_before: "15:55"
+
+alignment:
+  missing_policy: drop_core_missing
+  core_symbols_required: true
+
+hmm_lab:
+  feature_set_version: cross_asset_v1
+  features_config: configs/features/cross_asset_v1.yaml
+  covariance_type: diag
+  n_iter: 50
+  min_covar: 0.0001
+  k_values: [3, 4, 5, 6]
+  seeds: [42, 7]
+  max_folds: 2
+  min_state_frequency: 0.01
+  save_posteriors: true
+  feature_sets:
+    - name: target_only_frozen
+      description: Target-only proxy for the frozen SPY-only baseline using the reusable target_* columns.
+      columns:
+        - target_ret_3
+        - target_ret_6
+        - target_ret_12
+        - target_range_ratio_6_24
+        - target_signed_efficiency_12
+        - target_dir_persistence_12
+        - target_dist_vwap_atr
+        - target_dist_open
+        - target_pos_session_range
+        - target_intraday_runup
+    - name: cross_asset_minimal
+      description: Target structure plus compact regime scores.
+      columns:
+        - target_ret_3
+        - target_ret_6
+        - target_ret_12
+        - target_range_ratio_6_24
+        - target_signed_efficiency_12
+        - target_dir_persistence_12
+        - target_dist_vwap_atr
+        - target_dist_open
+        - target_pos_session_range
+        - risk_on_score
+        - risk_off_score
+        - defensive_rotation_score
+        - narrow_rally_score
+        - chop_score
+    - name: cross_asset_sectors
+      description: Equity breadth, sector leadership and cyclical/defensive rotation.
+      columns:
+        - target_ret_3
+        - target_ret_6
+        - target_ret_12
+        - target_signed_efficiency_12
+        - target_dist_vwap_atr
+        - relret_QQQ_SPY_6
+        - relret_IWM_SPY_6
+        - relret_DIA_SPY_6
+        - relret_XLK_SPY_6
+        - relret_XLP_SPY_6
+        - spread_growth_defensive_12
+        - spread_cyclicals_defensive_12
+        - spread_tech_broad_12
+        - positive_index_count_6
+        - positive_sector_count_6
+        - sector_above_vwap_count
+        - sector_rel_strength_count_12
+        - leadership_concentration_score_12
+        - narrow_rally_score
+        - defensive_rotation_score
+    - name: cross_asset_macro
+      description: Equity versus duration, credit, gold and volatility expansion.
+      columns:
+        - target_ret_3
+        - target_ret_6
+        - target_ret_12
+        - target_range_ratio_6_24
+        - target_dist_vwap_atr
+        - relret_TLT_SPY_12
+        - relret_IEF_SPY_12
+        - relret_GLD_SPY_12
+        - relret_HYG_LQD_12
+        - spread_equity_bonds_12
+        - spread_equity_gold_12
+        - spread_credit_12
+        - market_range_ratio_6_24
+        - sector_range_dispersion_12
+        - cross_asset_vol_expansion_score
+        - intraday_stress_score
+        - risk_on_score
+        - risk_off_score
+    - name: cross_asset_full_core
+      description: Full compact cross-asset v1 HMM column set from the feature config.
+      columns: __hmm_feature_columns__
+  walk_forward:
+    train_months: 24
+    validation_months: 6
+    test_months: 6
+    step_months: 6
+  cost_profiles:
+    conservative_bps: 2.0
+    base_bps: 1.0
+    optimistic_bps: 0.5
+
+hmm_state_interpretability:
+  selection_source: validation_rank
+  selected_rank: 1
+  selected_feature_set: auto
+  selected_n_states: auto
+  selected_seed: auto
+  naming_split: validation
+  reference_split: train
+  min_state_frequency: 0.01
+  min_abs_z_clear: 0.5
+  min_score_clear: 0.45
+  min_score_margin_clear: 0.15
+  min_score_partial: 0.25
+  max_hour_pct: 0.35
+  max_session_pct: 0.08
+  max_non_target_ticker_share: 0.6
+  top_features: 5
+
+hmm_state_stability:
+  split: validation
+  reference_seed: min
+  min_seed_profile_cosine: 0.70
+  min_seeds_present: 2
+  min_folds_present: 2
+  min_k_present: 2
+  min_avg_state_frequency: 0.02
+  max_top_hour_pct: 0.35
+  max_non_target_ticker_share: 0.6
+  top_rows: 30
+  pnl_diagnostic: deferred_to_block_12
+
+hmm_state_economics_cross_asset:
+  selected_feature_sets: []
+  selected_n_states: []
+  selected_seeds: []
+  horizons: [1, 3, 6, 12]
+  cost_bps: [1.0, 2.0, 5.0]
+  actions: [long, short, momentum, reversion, flat]
+  include_stability_statuses: [stable_profile_candidate]
+  candidate_split: validation
+  holdout_split: test
+  min_trades: 50
+  min_profit_factor: 1.10
+  min_daily_sharpe: 1.0
+  require_same_hour_improvement: true
+  max_top_hour_pct: 0.35
+  max_top_session_pct: 0.10
+  max_daily_abs_net_share: 0.50
+  report_top_rows: 40
+
+state_rules_cross_asset:
+  candidate_source: results/{target_symbol}/state_economic_candidates.parquet
+  candidate_split: validation
+  test_split: test
+  rule_types: [long_momentum, short_momentum, mean_reversion, no_trade, reduce_risk]
+  horizons: [1, 3, 6, 12]
+  cost_bps: [1.0, 2.0, 5.0]
+  hmm_prob_thresholds: [0.0, 0.5, 0.6, 0.7, 0.8]
+  signal_thresholds: [0.0, 0.0001, 0.0002, 0.0005]
+  max_candidate_states: 60
+  max_rules_per_state: 2
+  min_trades: 50
+  min_profit_factor: 1.10
+  min_daily_sharpe: 1.0
+  require_no_hmm_improvement: true
+  require_same_hour_improvement: true
+  max_top_hour_pct: 0.40
+  max_top_session_pct: 0.12
+  max_daily_abs_net_share: 0.50
+  report_top_rows: 40
+
+hmm_risk_filter:
+  combo_source: results/{target_symbol}/state_rules_selected_specs.parquet
+  supervised_predictions: data/features/predictive_base_predictions.parquet
+  candidate_split: validation
+  test_split: test
+  strategies: [always_flat, momentum_simple, reversion_simple, vwap_location, supervised_simple]
+  filters: [no_filter, only_risk_on, exclude_risk_off, exclude_high_vol, exclude_chop, exclude_stress, reduce_stress]
+  horizons: [1, 3, 6, 12]
+  cost_bps: [1.0, 2.0, 5.0]
+  return_thresholds: [0.0, 0.0001, 0.0002, 0.0005]
+  vwap_thresholds: [0.0, 0.5, 1.0, 1.5]
+  supervised_thresholds: [0.0, 0.02, 0.05, 0.10]
+  max_combos: 60
+  max_filters_per_combo: 8
+  min_trades: 50
+  min_profit_factor: 1.0
+  min_sharpe_improvement: 0.0
+  min_drawdown_reduction: 0.0
+  require_nonnegative_net: true
+  require_same_hour_improvement: true
+  report_top_rows: 40
+
+candidate_cost_sensitivity_cross_asset:
+  selected_specs: results/{target_symbol}/risk_filter_selected_specs.parquet
+  validation_results: results/{target_symbol}/risk_filter_validation.parquet
+  candidate_split: validation
+  test_split: test
+  cost_bps: [1.0, 2.0, 5.0]
+  horizons: [1, 3, 6, 12]
+  threshold_cost_scenarios: [bps_1, bps_2, ibkr_tiered_10000]
+  horizon_cost_scenarios: [bps_1, bps_2, ibkr_tiered_10000]
+  threshold_multipliers: [0.5, 0.75, 1.0, 1.25, 1.5]
+  threshold_additive:
+    momentum_simple: [-0.0001, 0.0, 0.0001]
+    reversion_simple: [-0.0001, 0.0, 0.0001]
+    vwap_location: [-0.5, 0.0, 0.5]
+    supervised_simple: [-0.02, 0.0, 0.02]
+    default: [0.0]
+  ibkr:
+    enabled: true
+    source_url: https://brokerage.ibkr.com/en/pricing/commissions-stocks.php
+    plans: [tiered, fixed]
+    notionals_usd: [2500, 5000, 10000, 25000, 100000]
+    tiered_commission_per_share_usd: 0.0035
+    tiered_min_commission_per_order_usd: 0.35
+    fixed_commission_per_share_usd: 0.005
+    fixed_min_commission_per_order_usd: 1.0
+    max_commission_pct_trade_value: 0.01
+    sec_fee_rate_on_sell: 0.0000206
+    finra_taf_per_share_on_sell_usd: 0.000195
+    finra_taf_cap_usd: 9.79
+    tiered_clearing_per_share_per_side_usd: 0.00020
+    spread_slippage_bps_round_trip: 1.0
+  acceptance:
+    primary_cost_scenario: ibkr_tiered_10000
+    conservative_cost_scenario: bps_2
+    ibkr_required_scenario: ibkr_tiered_10000
+    min_daily_sharpe: 1.0
+    min_profit_factor: 1.10
+    max_drawdown: 0.20
+    max_top_day_abs_net_share: 0.40
+    min_threshold_pass_rate: 0.60
+    min_horizon_pass_rate: 0.50
+  report_top_rows: 40
+
+cross_asset_vs_baselines:
+  candidate_decisions: results/{target_symbol}/candidate_decisions.parquet
+  risk_filter_test: results/{target_symbol}/risk_filter_test.parquet
+  risk_filter_validation: results/{target_symbol}/risk_filter_validation.parquet
+  state_rules_test: results/{target_symbol}/state_rules_test.parquet
+  state_rules_validation: results/{target_symbol}/state_rules_validation.parquet
+  spy_only_frozen_results: baselines/spy_only_hmm/results.parquet
+  candidate_split: validation
+  test_split: test
+  shuffled_state_samples: 3
+  shuffled_state_seed: 1729
+  report_top_rows: 80
+
+operable_candidate_search:
+  combo_source: results/{target_symbol}/hmm_feature_lab_cross_asset.parquet
+  preferred_combo_source: results/{target_symbol}/risk_filter_selected_specs.parquet
+  candidate_split: validation
+  test_split: test
+  feature_sets:
+    - target_only_frozen
+    - cross_asset_minimal
+    - cross_asset_sectors
+    - cross_asset_macro
+    - cross_asset_full_core
+  max_combos: 20
+  horizons: [6, 12, 24]
+  strategies:
+    - momentum_ret_6
+    - momentum_ret_12
+    - reversion_ret_6
+    - reversion_ret_12
+    - vwap_reversion
+    - vwap_breakout
+    - supervised_score
+    - risk_on_long
+    - risk_off_short
+    - stress_short
+  filters:
+    - only_risk_on
+    - exclude_risk_off
+    - exclude_high_vol
+    - exclude_chop
+    - exclude_stress
+  threshold_quantiles: [0.80, 0.95]
+  validation_cost_scenarios:
+    - ibkr_tiered_10000
+  cost_scenarios:
+    - bps_2
+    - ibkr_tiered_10000
+    - bps_5
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  min_trades: 30
+  max_turnover: 4.0
+  min_profit_factor: 1.10
+  min_daily_sharpe: 1.0
+  max_drawdown: 0.12
+  max_top_day_abs_net_share: 0.35
+  max_selected: 80
+  report_top_rows: 60
+  progress_every_combos: 2
+
+operable_candidate_triage:
+  decisions: results/{target_symbol}/operable_candidate_decisions.parquet
+  selected_validation: results/{target_symbol}/operable_candidate_selected_validation.parquet
+  test: results/{target_symbol}/operable_candidate_test.parquet
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+  min_trades: 30
+  max_turnover: 4.0
+  min_profit_factor: 1.10
+  min_daily_sharpe: 1.0
+  max_drawdown: 0.12
+  max_top_day_abs_net_share: 0.35
+  report_top_rows: 60
+
+operable_alpha_refinement:
+  triage_source: results/{target_symbol}/operable_candidate_triage.parquet
+  candidate_split: validation
+  test_split: test
+  focus_next_actions:
+    - promote_family_to_feature_refinement
+  focus_strategies:
+    - momentum_ret_6
+  max_combos: 12
+  horizons: [24]
+  variants:
+    - m6_base
+    - m6_ret12_confirm
+    - m6_vwap_confirm
+    - m6_efficiency_confirm
+    - m6_ret12_vwap
+    - m6_ret12_low_chop
+    - m6_ret12_low_stress
+    - m6_ret12_directional_risk
+    - m6_ret12_cross_asset_breadth
+    - m6_ret12_vwap_low_stress
+    - m6_ret12_vwap_directional_risk
+    - m6_ret12_vwap_breadth
+  filters:
+    - only_risk_on
+    - exclude_stress
+    - exclude_high_vol
+  threshold_quantiles: [0.80, 0.90, 0.95]
+  efficiency_abs_quantile: 0.50
+  chop_max_quantile: 0.70
+  stress_max_quantile: 0.70
+  risk_score_quantile: 0.55
+  breadth_high_quantile: 0.65
+  cost_scenarios:
+    - bps_2
+    - ibkr_tiered_10000
+    - bps_5
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+  min_trades: 30
+  max_turnover: 4.0
+  min_profit_factor: 1.10
+  min_daily_sharpe: 1.0
+  max_drawdown: 0.12
+  max_top_day_abs_net_share: 0.35
+  max_selected: 80
+  report_top_rows: 60
+
+alpha_discovery_base:
+  candidate_split: validation
+  test_split: test
+  horizons: [12, 24]
+  variants:
+    - m6_base
+    - m6_long_only
+    - m6_short_only
+    - m6_ret12_confirm
+    - m6_vwap_confirm
+    - m6_ret12_vwap
+    - m6_low_chop
+    - m6_low_stress
+    - m6_directional_risk
+    - m6_breadth
+    - m6_efficiency
+    - vwap_breakout
+    - vwap_reversion
+    - gap_breakout
+    - gap_reversion
+    - risk_on_long
+    - risk_off_short
+    - growth_defensive_momentum
+    - cyclicals_defensive_momentum
+    - equity_bonds_momentum
+    - credit_momentum
+  threshold_quantiles: [0.75, 0.85, 0.95]
+  efficiency_abs_quantile: 0.50
+  range_ratio_max_quantile: 0.75
+  chop_max_quantile: 0.70
+  stress_max_quantile: 0.70
+  risk_score_quantile: 0.55
+  breadth_high_quantile: 0.65
+  cost_scenarios:
+    - bps_2
+    - ibkr_tiered_10000
+    - bps_5
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+  min_trades: 30
+  max_turnover: 4.0
+  min_profit_factor: 1.10
+  min_daily_sharpe: 1.0
+  max_drawdown: 0.12
+  max_top_day_abs_net_share: 0.35
+  max_selected: 80
+  report_top_rows: 80
+
+alpha_fold_degradation_diagnostics:
+  selected_specs: results/{target_symbol}/alpha_discovery_selected_specs.parquet
+  decisions: results/{target_symbol}/alpha_discovery_decisions.parquet
+  primary_cost_scenario: ibkr_tiered_10000
+  feature_columns:
+    - target_ret_6
+    - target_ret_12
+    - target_dist_vwap_atr
+    - target_signed_efficiency_12
+    - target_range_ratio_6_24
+    - chop_score
+    - intraday_stress_score
+    - risk_on_score
+    - risk_off_score
+    - positive_index_count_6
+    - positive_sector_count_6
+  report_top_rows: 100
+
+spy_setup_feasibility:
+  horizons: [12, 24]
+  cost_scenarios:
+    - ibkr_tiered_10000
+    - bps_2
+    - bps_5
+  primary_cost_scenario: ibkr_tiered_10000
+  stress_cost_scenario: bps_5
+  min_segment_rows: 40
+  tercile_columns:
+    gap: target_overnight_ret
+    abs_gap: target_abs_overnight_ret
+    rv12_rel: target_rv_12_rel_by_bar
+    dist_vwap: target_dist_vwap_atr
+    rel_volume: target_rel_volume_by_bar
+    range_ratio: target_range_ratio_6_24
+  boolean_segments:
+    - target_above_or_6_high
+    - target_below_or_6_low
+    - target_failed_breakout_high_12
+    - target_failed_breakout_low_12
+    - target_breaks_roll_high_12
+    - target_breaks_roll_low_12
+    - target_first_60m
+    - target_lunch
+    - target_last_60m
+  report_top_rows: 100
+
+setup_signal_search:
+  horizons: [12, 24]
+  families:
+    - opening_range_breakout
+    - gap_fill
+    - vwap_stretch_reversal
+    - failed_breakout
+    - compression_breakout
+    - breakdown_short_risk_off
+  rel_volume_quantiles: [0.50, 0.67, 0.75]
+  wick_quantiles: [0.60, 0.75]
+  range_ratio_quantiles: [0.33, 0.50]
+  close_location_thresholds: [0.55, 0.70]
+  vwap_abs_mins: [0.0, 0.25, 0.50]
+  gap_low_quantile: 0.25
+  gap_high_quantile: 0.75
+  gap_fill_progress_mins: [0.20, 0.50]
+  risk_off_quantiles: [0.60, 0.75]
+  breadth_low_quantile: 0.33
+  cost_scenarios:
+    - ibkr_tiered_10000
+    - bps_2
+    - bps_5
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+  min_trades: 40
+  min_profit_factor: 1.05
+  min_daily_sharpe: 0.30
+  max_drawdown: 0.30
+  max_top_day_abs_net_share: 0.30
+  max_top_month_abs_net_share: 0.50
+  require_base_segment_improvement: true
+  max_selected: 120
+  report_top_rows: 100

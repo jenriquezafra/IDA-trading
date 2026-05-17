@@ -1,0 +1,72 @@
+project:
+  name: ida-trading
+  timezone: America/New_York
+  frequency: 60min
+lab:
+  target_symbol: SPY
+  target_profile: broad_market
+  timeframe: 60min
+  provider: polygon
+  start_date: '2021-05-01'
+  end_date: '2026-05-01'
+  universe_config: configs/universes/core_cross_asset.yaml
+  universe_id: core_cross_asset_v1
+  context_key: context_universe_core
+  benchmark_key: benchmark_universe
+  include_target_in_context: true
+  optional_symbols: []
+polygon:
+  api_key_env: POLYGON_API_KEY
+  source_interval: 5m
+  adjusted: true
+  default_years: 5
+paths:
+  raw_dir: data/raw/polygon
+  cleaned_dir: data/cleaned
+  aligned_dir: data/aligned
+  features_dir: data/features
+  models_dir: models/60min_liquid
+  results_dir: results/60min_liquid
+  metadata_dir: data/metadata
+  reports_dir: reports/60min_liquid
+  data_coverage_dir: reports/60min_liquid/data_coverage
+  alignment_dir: reports/60min_liquid/alignment
+session:
+  market_open: 09:30
+  market_close: '16:00'
+  timestamp_label: start
+  regular_session_only: true
+  drop_incomplete_sessions: true
+  expected_bars_per_session: 6
+calendar:
+  enabled: true
+  name: NYSE
+  drop_non_trading_days: true
+  drop_half_days: true
+quality:
+  drop_duplicate_timestamps: true
+  drop_critical_nan_rows: true
+  drop_invalid_price_rows: true
+  drop_negative_volume_rows: true
+  drop_extreme_range_rows: true
+  max_bar_range_bps: 1000.0
+labeling:
+  horizon_bars: 1
+  buffer_bps: 0.5
+  lambda_vol: 0.25
+  round_trip_cost_bps: 1.0
+backtest:
+  no_new_trades_after: '15:30'
+  force_flat_before: '15:30'
+alignment:
+  missing_policy: drop_core_missing
+  core_symbols_required: true
+hmm_lab:
+  feature_set_version: cross_asset_60min
+  features_config: configs/features/cross_asset_60min.yaml
+  covariance_type: diag
+  n_iter: 50
+  min_covar: 0.0001
+  max_folds: 2
+  min_state_frequency: 0.01
+  save_posteriors: true

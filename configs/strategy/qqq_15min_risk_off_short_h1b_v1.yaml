@@ -1,0 +1,71 @@
+strategy_id: qqq_15min_risk_off_short_h1b_v1
+target_symbol: QQQ
+timeframe: 15min
+feature_set_id: cross_asset_liquid_15min
+alpha_id: risk_off_short_h1b_credit_weak_v1
+entry_rule: next_open
+exit_rule:
+  type: fixed_horizon_open
+  horizon_bars: 6
+position:
+  side: short_only
+  max_gross_exposure: 1.0
+  sizing: fixed_unit
+risk:
+  no_new_trades_after: "15:45"
+  force_flat_before: "15:55"
+  max_turnover: 4.0
+cost_profile_id: bps_2_primary_bps_5_stress
+split_policy_id: wf_24m_6m_6m_step6m_embargo1
+
+alpha:
+  hypothesis_id: H1b
+  parent_hypothesis_id: H1
+  selected_variant_id: riskq55__vixq45__credit_weak_q50
+  candidate_label: target_breakdown__risk_off__vix_pressure
+  description: >
+    Short QQQ after intraday target breakdown when risk-off context, prior VIX
+    pressure and weak credit confirm de-risking.
+  rules:
+    - column: target_ret_6
+      operator: "<"
+      value: 0.0
+      fitted_on: fixed_rule
+    - column: target_ret_12
+      operator: "<"
+      value: 0.0
+      fitted_on: fixed_rule
+    - column: risk_off_score
+      operator: ">="
+      fit_on: train_fold
+      quantile: 0.55
+    - column: prev_vix_z20
+      operator: ">="
+      fit_on: train_fold
+      quantile: 0.45
+    - column: spread_credit_12
+      operator: "<="
+      fit_on: train_fold
+      quantile: 0.50
+      filter_policy: credit_weak_q50
+  economic_rationale: >
+    QQQ downside continuation should be more reliable when the selloff is
+    confirmed by weak credit, using HYG versus LQD as a de-risking proxy.
+
+data:
+  provider: polygon
+  feature_path: data/features/QQQ/15min/core_cross_asset_v1/cross_asset_liquid_15min/features.parquet
+  risk_context_path: data/external/cboe/risk_context_daily.parquet
+  point_in_time_rule: join Cboe daily context with session == available_session
+
+costs:
+  primary_bps: 2.0
+  stress_bps: 5.0
+
+selection:
+  source_runner: python -m src.strategy.risk_off_short_h1b_sweep
+  source_dir: results/strategy/risk_off_short/QQQ/15min/h1b_concentration_sweep
+  selected_with: validation_only
+  test_usage: confirmation_only
+  promotion_status: freeze_review
+  promotion_gate_set: DEFAULT_PROMOTION_GATES

@@ -1,0 +1,6 @@
+execution_policy:
+  intent: flatten_at_next_open
+  order_type: MKT
+  tif: OPG
+  outside_rth: false
+  routing_exchange: SMART

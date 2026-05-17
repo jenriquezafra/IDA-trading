@@ -1,0 +1,121 @@
+research:
+  research_id: alpha_research_v1
+  target_symbol: QQQ
+  timeframe: 15min
+  split_policy_id: wf_24m_6m_6m_step6m_embargo1
+  output_dir_template: results/alpha/{research_id}/{target_symbol}/{timeframe}
+  split_policy:
+    train_months: 24
+    validation_months: 6
+    test_months: 6
+    step_months: 6
+    embargo_sessions: 1
+
+dataset:
+  provider: polygon
+  universe_id: core_cross_asset_v1
+  feature_set_id: cross_asset_liquid_15min
+  feature_path_template: data/features/{target_symbol}/{timeframe}/core_cross_asset_v1/{feature_set_id}/features.parquet
+
+costs:
+  primary: ibkr_tiered_10000
+  conservative: bps_2
+  stress: bps_5
+
+strategy_defaults:
+  entry_rule: next_open
+  position:
+    side: long_short
+    max_gross_exposure: 1.0
+    sizing: fixed_unit
+  risk:
+    no_new_trades_after: "15:45"
+    force_flat_before: "15:55"
+    max_turnover: 4.0
+
+promotion_gates:
+  min_trades: 50
+  min_profit_factor: 1.10
+  min_daily_sharpe: 1.0
+  require_positive_primary_cost: true
+  require_nonnegative_conservative_cost: true
+  require_base_control_improvement: true
+  require_same_hour_control_improvement: true
+  max_top_day_abs_net_share: 0.35
+  max_top_month_abs_net_share: 0.50
+
+alphas:
+  - alpha_id: m6_base
+    family: intraday_momentum
+    description: Directional target momentum over the last six bars.
+    signal_column: target_ret_6
+    mode: signed
+    horizons: [2, 3, 4, 6]
+    threshold_quantiles: [0.55, 0.65, 0.75]
+    min_trades: 50
+
+  - alpha_id: m6_ret12_confirm
+    family: intraday_momentum
+    description: Six-bar momentum confirmed by twelve-bar momentum.
+    signal_column: target_ret_6
+    mode: signed
+    horizons: [2, 3, 4, 6]
+    threshold_quantiles: [0.55, 0.65, 0.75]
+    min_trades: 50
+    confirmations:
+      - type: same_sign
+        column: target_ret_12
+
+  - alpha_id: m6_ret12_vwap
+    family: intraday_momentum
+    description: Momentum confirmed by twelve-bar trend and distance from VWAP.
+    signal_column: target_ret_6
+    mode: signed
+    horizons: [2, 3, 4, 6]
+    threshold_quantiles: [0.55, 0.65, 0.75]
+    min_trades: 50
+    confirmations:
+      - type: same_sign
+        column: target_ret_12
+      - type: same_sign
+        column: target_dist_vwap_atr
+
+  - alpha_id: m6_low_stress
+    family: intraday_momentum
+    description: Momentum only when intraday stress is below its validation quantile.
+    signal_column: target_ret_6
+    mode: signed
+    horizons: [2, 3, 4, 6]
+    threshold_quantiles: [0.55, 0.65, 0.75]
+    min_trades: 50
+    confirmations:
+      - type: max_quantile
+        column: intraday_stress_score
+        quantile: 0.70
+
+  - alpha_id: vwap_reversion
+    family: intraday_reversion
+    description: Fade large target distance from VWAP.
+    signal_column: target_dist_vwap_atr
+    mode: inverse
+    horizons: [2, 3, 4]
+    threshold_quantiles: [0.65, 0.75, 0.85]
+    min_trades: 50
+
+  - alpha_id: risk_on_long
+    family: cross_asset_context
+    description: Long-only risk-on context score.
+    signal_column: risk_on_score
+    mode: long_positive
+    horizons: [2, 3, 4, 6]
+    threshold_quantiles: [0.55, 0.65, 0.75]
+    min_trades: 50
+
+  - alpha_id: risk_off_short
+    family: cross_asset_context
+    description: Short-only risk-off context score.
+    signal_column: risk_off_score
+    mode: short_positive
+    horizons: [2, 3, 4, 6]
+    threshold_quantiles: [0.55, 0.65, 0.75]
+    min_trades: 50

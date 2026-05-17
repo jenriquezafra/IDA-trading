@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IDA Paper/Live Control Center</title>
+    <link rel="stylesheet" href="/static/styles.css?v=paper-live-control4" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">IDA</div>
+        <div>
+          <h1>Paper/Live Control</h1>
+          <span id="system-state" class="state-pill">loading</span>
+        </div>
+      </div>
+
+      <div class="sidebar-live">
+        <span>Activos</span>
+        <strong id="active-count">0</strong>
+        <small>paper/live</small>
+      </div>
+
+      <div class="mode-switch" role="tablist" aria-label="Mode">
+        <button class="mode-button is-active" data-mode="paper">Paper</button>
+        <button class="mode-button" data-mode="live">Live</button>
+        <button class="mode-button" data-mode="connections">Conexión</button>
+      </div>
+
+      <nav id="candidate-nav" class="candidate-nav" aria-label="Active strategies"></nav>
+    </aside>
+
+    <main class="shell">
+      <header class="topbar">
+        <div class="title-block">
+          <p class="eyebrow">Paper/live only</p>
+          <h2 id="candidate-title">Centro de control</h2>
+          <p id="candidate-subtitle" class="muted">Estado operativo, capital, alertas, ledger y controles.</p>
+        </div>
+        <div class="summary-strip">
+          <div><span>Paused</span><strong id="paused-count">0</strong></div>
+          <div><span>Critical</span><strong id="critical-count">0</strong></div>
+          <div><span>Warnings</span><strong id="warning-count">0</strong></div>
+        </div>
+      </header>
+
+      <section id="alerts-panel" class="alerts-panel"></section>
+
+      <section id="connection-view" class="connection-view"></section>
+
+      <section id="strategy-view">
+        <section class="control-grid">
+          <div class="control-card">
+            <span class="metric-label">Automation</span>
+            <strong id="automation-state">-</strong>
+            <p id="automation-reason" class="muted">-</p>
+            <div class="danger-actions">
+              <button id="pause-button" class="danger-button">PAUSE</button>
+              <button id="resume-button" class="secondary-button">Resume</button>
+            </div>
+          </div>
+          <div class="control-card">
+            <span id="state-card-label" class="metric-label">Strategy state</span>
+            <strong id="paper-state">-</strong>
+            <p id="paper-position" class="muted">-</p>
+          </div>
+          <div class="control-card">
+            <span class="metric-label">Last run</span>
+            <strong id="last-decision">-</strong>
+            <p id="last-run-time" class="muted">-</p>
+          </div>
+          <div class="control-card">
+            <span class="metric-label">PnL realized</span>
+            <strong id="pnl-realized">-</strong>
+            <p id="pnl-detail" class="muted">-</p>
+          </div>
+        </section>
+
+      <section class="capital-panel">
+        <div class="panel-head">
+          <h3>Capital operativo</h3>
+          <span id="capital-status" class="muted"></span>
+        </div>
+        <form id="capital-form" class="capital-form">
+          <label>
+            Estado
+            <select id="control-enabled">
+              <option value="true">Encendida</option>
+              <option value="false">Apagada</option>
+            </select>
+          </label>
+          <label>
+            Tipo capital
+            <select id="capital-mode">
+              <option value="net_fraction">Neto / buying power</option>
+              <option value="absolute_usd">Absoluto USD</option>
+            </select>
+          </label>
+          <label>
+            Valor
+            <input id="capital-value" type="number" step="0.01" min="0" />
+          </label>
+          <label>
+            Base
+            <select id="capital-basis">
+              <option value="buying_power_fraction">Buying power</option>
+              <option value="available_funds_fraction">Available funds</option>
+              <option value="max_order_notional_usd">Max notional cap</option>
+            </select>
+          </label>
+          <label class="checkbox-label">
+            <input id="apply-config" type="checkbox" />
+            Aplicar a config runner
+          </label>
+          <button class="secondary-button" type="submit">Guardar control</button>
+        </form>
+      </section>
+
+      <section class="dashboard-grid">
+        <div class="panel market-panel">
+          <div class="panel-head">
+            <h3>Precio y señales</h3>
+            <span id="market-source" class="muted"></span>
+          </div>
+          <div id="market-chart"></div>
+          <div class="chart-legend">
+            <span><i class="legend-dot buy"></i> Buy</span>
+            <span><i class="legend-dot sell"></i> Sell</span>
+            <span><i class="legend-dot hold"></i> Hold</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>PnL histórico</h3>
+            <span id="pnl-source" class="muted"></span>
+          </div>
+          <div id="pnl-chart"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Daemon</h3>
+            <span id="daemon-updated" class="muted"></span>
+          </div>
+          <dl id="daemon-facts" class="facts"></dl>
+        </div>
+      </section>
+
+      <section class="table-section">
+        <div class="panel-head">
+          <h3>Últimos runs</h3>
+        </div>
+        <div class="table-panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Decisión</th>
+                <th>Razón</th>
+                <th>Señal</th>
+                <th>Qty</th>
+                <th>Recon</th>
+                <th>Órdenes</th>
+                <th>Latencia</th>
+              </tr>
+            </thead>
+            <tbody id="run-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="table-section">
+        <div class="panel-head">
+          <h3>Eventos de estado</h3>
+        </div>
+        <div class="table-panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Evento</th>
+                <th>Estado</th>
+                <th>Acción</th>
+                <th>Qty</th>
+                <th>Actualizado</th>
+              </tr>
+            </thead>
+            <tbody id="state-event-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="table-section">
+        <div class="panel-head">
+          <h3>Ledger operativo</h3>
+        </div>
+        <div class="table-panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Fuente</th>
+                <th>Evento</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Qty</th>
+                <th>Price</th>
+                <th>Net PnL</th>
+                <th>Exposure</th>
+                <th>Notas</th>
+              </tr>
+            </thead>
+            <tbody id="ledger-rows"></tbody>
+          </table>
+        </div>
+      </section>
+      </section>
+    </main>
+
+    <div id="chart-tooltip" class="chart-tooltip" hidden></div>
+
+    <script src="/static/app.js?v=paper-live-control4"></script>
+  </body>
+</html>

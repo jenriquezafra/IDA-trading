@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ida-trading.h1c-auto</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>/Users/jenriquezafra/Proyectos/Dev/python/IDA-trading/scripts/run_h1c_auto_daemon.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/jenriquezafra/Proyectos/Dev/python/IDA-trading</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/jenriquezafra/Proyectos/Dev/python/IDA-trading/logs/h1c_auto_runner.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/jenriquezafra/Proyectos/Dev/python/IDA-trading/logs/h1c_auto_runner.err.log</string>
+</dict>
+</plist>

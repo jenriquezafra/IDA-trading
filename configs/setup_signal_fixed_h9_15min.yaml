@@ -1,0 +1,137 @@
+project:
+  name: ida-trading
+  timezone: America/New_York
+  frequency: 15min
+lab:
+  target_symbol: SPY
+  timeframe: 15min
+  universe_id: core_cross_asset_v1
+paths:
+  features_dir: data/features
+  results_dir: results/h9_fixed_rules/spy_qqq_ko_amd_googl_15min_24_6_6_step3
+  reports_dir: reports/h9_fixed_rules/spy_qqq_ko_amd_googl_15min_24_6_6_step3
+hmm_lab:
+  feature_set_version: cross_asset_liquid_15min
+  features_config: configs/features/cross_asset_15min_liquid.yaml
+  max_folds: 9
+  walk_forward:
+    train_months: 24
+    validation_months: 6
+    test_months: 6
+    step_months: 3
+setup_signal_search:
+  horizons: [4, 12]
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+  signal_columns:
+    - target_overnight_ret
+    - target_abs_overnight_ret
+    - target_gap_fill_progress
+    - target_dist_open
+    - target_dist_vwap_atr
+    - target_range_ratio_2_8
+    - target_rv_4_rel_by_bar
+    - target_rel_volume_by_bar
+    - target_rel_cum_volume_by_bar
+    - target_close_location_bar
+    - target_bar_efficiency
+    - target_upper_wick_ratio
+    - target_lower_wick_ratio
+    - target_above_or_2_high
+    - target_below_or_2_low
+    - target_breaks_roll_high_4
+    - target_breaks_roll_low_4
+    - target_minutes_from_open
+    - target_minutes_to_close
+    - target_breakout_attempt_count_or_2_high
+    - target_breakout_attempt_count_or_2_low
+    - target_rel_volume_accel_2
+    - index_above_vwap_count
+    - sector_above_vwap_count
+    - risk_on_score
+    - risk_off_score
+    - positive_index_count_2
+    - positive_sector_count_2
+  column_map:
+    range_ratio: target_range_ratio_2_8
+    rv_rel: target_rv_4_rel_by_bar
+    opening_high: target_above_or_2_high
+    opening_low: target_below_or_2_low
+    opening_high_attempts: target_breakout_attempt_count_or_2_high
+    opening_low_attempts: target_breakout_attempt_count_or_2_low
+    rel_volume_accel: target_rel_volume_accel_2
+    breaks_roll_high: target_breaks_roll_high_4
+    breaks_roll_low: target_breaks_roll_low_4
+    positive_index_count: positive_index_count_2
+    positive_sector_count: positive_sector_count_2
+setup_signal_fixed_rules:
+  targets: [SPY, QQQ, KO, AMD, GOOGL]
+  results_dir: results/h9_fixed_rules/spy_qqq_ko_amd_googl_15min_24_6_6_step3/_fixed_rules
+  reports_dir: reports/h9_fixed_rules/spy_qqq_ko_amd_googl_15min_24_6_6_step3/_fixed_rules
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+  min_positive_targets: 3
+  report_top_rows: 120
+  rules:
+    - name: ob30_long_accel_h4
+      family: opening_bias_followthrough
+      direction: long
+      horizon_bars: 4
+      params:
+        bias_attempts_min: 1
+        rel_volume_min: 0.85
+        rel_volume_accel_min: 0.95
+        close_location_min: 0.55
+        vwap_floor: 0.0
+        vwap_ceiling: 1.25
+        dist_open_min: 0.0
+        positive_index_min: 2
+        positive_sector_min: 4
+        min_minutes_from_open: 30
+        min_minutes_to_close: 45
+    - name: ob30_long_vwap_breadth_h12
+      family: opening_bias_followthrough
+      direction: long
+      horizon_bars: 12
+      params:
+        bias_attempts_min: 1
+        rel_volume_min: 0.85
+        close_location_min: 0.65
+        vwap_floor: -0.25
+        vwap_ceiling: 1.25
+        dist_open_min: 0.0
+        index_above_vwap_min: 3
+        sector_above_vwap_min: 5
+        min_minutes_from_open: 30
+        min_minutes_to_close: 45
+    - name: ob30_long_basic_h4
+      family: opening_bias_followthrough
+      direction: long
+      horizon_bars: 4
+      params:
+        bias_attempts_min: 1
+        rel_volume_min: 0.70
+        close_location_min: 0.55
+        vwap_floor: 0.0
+        vwap_ceiling: 0.75
+        dist_open_min: 0.0
+        min_minutes_from_open: 30
+        min_minutes_to_close: 45
+candidate_cost_sensitivity_cross_asset:
+  cost_bps: [1.0, 2.0, 5.0]
+  ibkr:
+    enabled: true
+    plans: [tiered, fixed]
+    notionals_usd: [5000, 10000, 25000]
+    spread_slippage_bps_round_trip: 1.5
+    tiered_commission_per_share_usd: 0.0035
+    tiered_min_commission_per_order_usd: 0.35
+    tiered_clearing_per_share_per_side_usd: 0.0002
+    fixed_commission_per_share_usd: 0.005
+    fixed_min_commission_per_order_usd: 1.0
+    max_commission_pct_trade_value: 0.01
+    sec_fee_rate_on_sell: 0.0000206
+    finra_taf_per_share_on_sell_usd: 0.000195
+    finra_taf_cap_usd: 9.79

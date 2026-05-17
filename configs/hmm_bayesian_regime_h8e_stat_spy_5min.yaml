@@ -1,0 +1,238 @@
+project:
+  name: ida-trading
+  timezone: America/New_York
+  frequency: 5min
+lab:
+  target_symbol: SPY
+  timeframe: 5min
+  universe_id: core_cross_asset_v1
+paths:
+  features_dir: data/features
+  models_dir: models/h8_regime_setup_meta_stat/spy_5min_24_6_6_step3
+  results_dir: results/h8_regime_setup_meta_stat/spy_5min_24_6_6_step3
+  reports_dir: reports/h8_regime_setup_meta_stat/spy_5min_24_6_6_step3
+bayesian_regime_h8:
+  feature_set_version: cross_asset_v1
+  momentum_column: target_ret_12
+  volatility_column: target_rv_24_rel_by_bar
+  efficiency_column: target_signed_efficiency_12
+  variants:
+    - manual_h8a
+  walk_forward:
+    train_months: 24
+    validation_months: 6
+    test_months: 6
+    step_months: 3
+  max_folds: 9
+  probability_thresholds:
+    - 0.55
+  max_entropy_values:
+    - 0.75
+  horizons:
+    - 12
+  cost_bps:
+    - 1.0
+h8_position_model:
+  selected_h8_variant: manual_h8a
+  horizon_bars: 12
+  label_cost_scenario: ibkr_tiered_10000
+  label_cost_bps: 1.0
+  primary_cost_bps: 1.0
+  include_regime_dynamics_features: true
+  net_ridge_alpha: 10.0
+  net_target_clip_bps: 75.0
+  use_expected_net_gate: true
+  selection_scope: global
+  results_dir: results/h8_regime_setup_meta_stat/spy_5min_24_6_6_step3/{target}/h8_position_model
+  report_file: reports/h8_regime_setup_meta_stat/spy_5min_24_6_6_step3/{target}/h8_position_model.md
+  models_dir: models/h8_regime_setup_meta_stat/spy_5min_24_6_6_step3/{target}/h8_position_model
+  gate_modes:
+    - regime_confirmed
+  regime_thresholds:
+    - 0.65
+  max_entropy_values:
+    - 0.75
+  cost_bps:
+    - 1.0
+    - 2.0
+    - 5.0
+  probability_thresholds:
+    - 0.50
+  min_probability_gaps:
+    - 0.05
+  expected_net_threshold_bps:
+    - 0.0
+  min_expected_net_gaps_bps:
+    - 0.0
+  min_validation_trades: 40
+  C: 0.5
+  solver: lbfgs
+  class_weight: balanced
+  max_iter: 2000
+  random_state: 42
+  model_feature_columns:
+    - target_ret_1
+    - target_ret_2
+    - target_ret_4
+    - target_ret_8
+    - target_signed_efficiency_4
+    - target_signed_efficiency_12
+    - target_dir_persistence_4
+    - target_dir_persistence_12
+    - target_dist_vwap_atr
+    - target_dist_open
+    - target_pos_session_range
+    - target_intraday_runup
+    - target_intraday_drawdown
+    - target_rel_volume_by_bar
+    - target_rel_cum_volume_by_bar
+    - target_rv_12_rel_by_bar
+    - target_absret_12_to_rv_12
+    - target_breakout_margin_roll_high_8_atr
+    - target_breakdown_margin_roll_low_8_atr
+    - target_breakout_margin_or_2_high_atr
+    - target_breakdown_margin_or_2_low_atr
+    - target_close_location_bar
+    - target_clv
+    - positive_index_count_6
+    - positive_sector_count_6
+    - sector_above_vwap_count
+    - sector_rel_strength_count_6
+    - leadership_concentration_score_6
+    - spread_growth_defensive_12
+    - spread_tech_broad_12
+    - spread_credit_12
+    - relret_QQQ_SPY_6
+    - relret_IWM_SPY_6
+    - relret_HYG_LQD_12
+    - risk_on_score
+    - risk_off_score
+    - defensive_rotation_score
+    - narrow_rally_score
+    - cross_asset_vol_expansion_score
+    - intraday_stress_score
+    - chop_score
+h8_position_lifecycle:
+  entry_exit_mode: true
+  setup_entry_mode: true
+  primary_cost_scenario: ibkr_tiered_10000
+  conservative_cost_scenario: bps_2
+  stress_cost_scenario: bps_5
+  selection_cost_scenario: bps_5
+  grid_cost_scenarios:
+    - bps_5
+  entry_gate_modes:
+    - regime_confirmed
+  entry_probability_thresholds:
+    - 0.50
+    - 0.55
+  entry_min_probability_gaps:
+    - 0.05
+  entry_use_expected_net_gate: true
+  entry_expected_net_threshold_bps:
+    - 0.0
+    - 1.0
+  entry_min_expected_net_gaps_bps:
+    - 0.0
+  entry_regime_thresholds:
+    - 0.65
+  entry_max_entropy_values:
+    - 0.75
+  exit_gate_modes:
+    - regime_confirmed
+  exit_probability_thresholds:
+    - 0.45
+    - 0.50
+  exit_min_probability_gaps:
+    - 0.0
+  exit_use_expected_net_gate: true
+  exit_expected_net_threshold_bps:
+    - -1.0
+  exit_min_expected_net_gaps_bps:
+    - 0.0
+  exit_regime_thresholds:
+    - 0.45
+  exit_max_entropy_values:
+    - null
+  max_hold_bars:
+    - 0
+    - 24
+    - 48
+  min_hold_bars:
+    - 1
+  cooldown_bars:
+    - 0
+  exit_on_signal_loss:
+    - true
+  setup_specs:
+    - name: stat_gap_fill_short_fold4
+      family: gap_fill
+      direction: short
+      params:
+        gap_fill_progress_min: 0.5
+        gap_high: 0.003540016569643209
+        gap_low: -0.0013155011763366993
+        vwap_floor: 0.25
+    - name: stat_gap_fill_short_fold1
+      family: gap_fill
+      direction: short
+      params:
+        gap_fill_progress_min: 0.5
+        gap_high: 0.003290463736840393
+        gap_low: -0.0023270273736025054
+        vwap_floor: 0.25
+    - name: stat_breakdown_short_risk_off
+      family: breakdown_short_risk_off
+      direction: short
+      params:
+        positive_index_max: 0.0
+        positive_sector_max: 2.0
+        rel_volume_min: 0.8398022611443587
+        risk_off_min: 0.0033796981037429123
+        vwap_min: 0.25
+    - name: stat_gap_fill_long_fold5_floor_neg025
+      family: gap_fill
+      direction: long
+      params:
+        gap_fill_progress_min: 0.5
+        gap_high: 0.00398254760912038
+        gap_low: -0.0007724869126886371
+        vwap_floor: -0.25
+    - name: stat_gap_fill_long_fold5_floor_000
+      family: gap_fill
+      direction: long
+      params:
+        gap_fill_progress_min: 0.5
+        gap_high: 0.00398254760912038
+        gap_low: -0.0007724869126886371
+        vwap_floor: 0.0
+  min_validation_turnover: 20.0
+  min_positive_fold_share: 0.67
+  min_daily_sharpe: 0.75
+  min_net_per_turnover_bps: 1.0
+candidate_cost_sensitivity_cross_asset:
+  cost_bps:
+    - 1.0
+    - 2.0
+    - 5.0
+    - 7.5
+    - 10.0
+  ibkr:
+    enabled: true
+    plans:
+      - tiered
+      - fixed
+    notionals_usd:
+      - 5000
+      - 10000
+      - 25000
+    spread_slippage_bps_round_trip: 1.5
+    tiered_commission_per_share_usd: 0.0035
+    tiered_min_commission_per_order_usd: 0.35
+    tiered_clearing_per_share_per_side_usd: 0.0002
+    fixed_commission_per_share_usd: 0.005
+    fixed_min_commission_per_order_usd: 1.0
+    max_commission_pct_trade_value: 0.01
+    sec_fee_rate_on_sell: 0.0000206
+    finra_taf_per_share_on_sell_usd: 0.000195
+    finra_taf_cap_usd: 9.79

@@ -1,0 +1,21 @@
+plan:
+  strategy_id: qqq_15min_risk_off_short_h1c_v1
+  account: DU9782002
+  symbol: QQQ
+  sec_type: STK
+  currency: USD
+  routing_exchange: SMART
+  primary_exchange: NASDAQ
+  require_reconciliation_ok: true
+  allowed_reconciliation_decisions:
+    - OK_FLAT
+  max_quantity: 1000000
+
+execution_policy:
+  order_type: MKT
+  tif: DAY
+  outside_rth: false
+  intent: h1c_short_entry
+
+outputs:
+  output_dir: results/paper/h1c_order_plan

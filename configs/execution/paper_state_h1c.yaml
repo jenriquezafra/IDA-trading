@@ -1,0 +1,8 @@
+state:
+  strategy_id: qqq_15min_risk_off_short_h1c_v1
+  account: DU9782002
+  symbol: QQQ
+  state_path: results/paper/h1c_state/state.yaml
+  event_log_path: results/paper/h1c_state/events.parquet
+  output_dir: results/paper/h1c_state/runs
+  allow_send_orders_tickets: false
