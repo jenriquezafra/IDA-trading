@@ -11,6 +11,11 @@ data/**
 models/*
 !models/.gitkeep
 
+baselines/**
+!baselines/
+!baselines/**/
+!baselines/**/.gitkeep
+
 reports/*
 !reports/.gitkeep
 !reports/*.md
