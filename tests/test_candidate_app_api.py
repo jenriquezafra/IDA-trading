@@ -48,13 +48,16 @@ def test_candidate_api_renders_main_dashboard(tmp_path: Path) -> None:
     response = endpoint_for(app, "/")()
     html = Path(response.path).read_text(encoding="utf-8")
 
-    assert "Paper/Live Control" in html
+    assert "Trading Strats Control Center" in html
     assert "Capital operativo" in html
     assert "Precio y señales" in html
     assert "chart-tooltip" in html
     assert "Ledger operativo" in html
+    assert "Ledger manual / review" in html
     assert "Últimos runs" in html
     assert "Eventos de estado" in html
+    assert "Operaciones y posición" in html
+    assert "Posición actual" in html
 
 
 def test_candidate_api_create_filter_and_status_flow(tmp_path: Path) -> None:
@@ -141,9 +144,13 @@ def test_control_endpoint_reports_active_candidates() -> None:
     assert snapshot["active_candidates"][0]["mode"] == "paper"
     assert "alerts" in snapshot["active_candidates"][0]
     assert "ledger" in snapshot["active_candidates"][0]
-    ko = next(candidate for candidate in snapshot["active_candidates"] if candidate["candidate_id"] == "ko-defensive-paper-demo")
-    assert ko["symbol"] == "KO"
-    assert {point["marker"]["action"] for point in ko["market"]["series"] if point.get("marker")} == {"buy", "sell", "hold"}
+    assert "operations" in snapshot["active_candidates"][0]
+    assert "position" in snapshot["active_candidates"][0]
+    assert "current" in snapshot["active_candidates"][0]["position"]
+    assert "timeline" in snapshot["active_candidates"][0]["position"]
+    c2 = next(candidate for candidate in snapshot["active_candidates"] if candidate["candidate_id"] == "c2-googl-opening-bias-followthrough")
+    assert c2["symbol"] == "GOOGL"
+    assert c2["strategy_id"] == "c2_h9_googl_5min_opening_bias_followthrough_v1"
 
 
 def test_connection_and_runtime_control_routes(tmp_path: Path) -> None:

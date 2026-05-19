@@ -379,6 +379,14 @@ p {
   grid-column: 1 / -1;
 }
 
+.position-panel {
+  grid-column: 1 / -1;
+}
+
+.position-panel .facts {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .capital-panel,
 .panel {
   min-width: 0;
@@ -639,5 +647,9 @@ tr:last-child td {
 
   .topbar {
     display: grid;
+  }
+
+  .position-panel .facts {
+    grid-template-columns: 1fr;
   }
 }

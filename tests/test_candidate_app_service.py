@@ -161,6 +161,23 @@ def test_paper_ledger_tracks_pnl_by_candidate(tmp_path: Path) -> None:
     assert detail["paper_ledger_summary"]["max_pnl_drawdown"] == -12.0
 
 
+def test_control_snapshot_excludes_manual_ledger_from_operational_pnl(tmp_path: Path) -> None:
+    db_path = tmp_path / "candidates.sqlite"
+    prepare_store(db_path, seed=True)
+
+    snapshot = candidate_control_snapshot("qqq-risk-off-credit-spread", root=tmp_path, db_path=db_path)
+
+    assert snapshot["pnl"]["realized_pnl"] == 0.0
+    assert snapshot["pnl"]["source_available"] is False
+    assert snapshot["pnl"]["manual_ledger_affects_pnl"] is False
+    assert snapshot["pnl"]["excluded_manual_ledger_count"] == 3
+    assert snapshot["ledger"]["events"] == []
+    assert snapshot["manual_ledger"]["count"] == 3
+    assert snapshot["manual_ledger"]["affects_operational_pnl"] is False
+    assert snapshot["manual_ledger"]["metrics"]["realized_pnl"] == 143.28
+    assert any(alert["code"] == "PNL_LOG_MISSING" for alert in snapshot["alerts"])
+
+
 def test_control_action_toggles_kill_switch(tmp_path: Path) -> None:
     db_path = tmp_path / "candidates.sqlite"
     (tmp_path / "ops" / "kill_switches").mkdir(parents=True)

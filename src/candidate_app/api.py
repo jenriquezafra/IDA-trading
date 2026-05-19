@@ -13,6 +13,7 @@ from src.candidate_app.control import (
     candidate_control_snapshot,
     connection_snapshot,
     control_center_snapshot,
+    operational_snapshot,
     update_strategy_runtime_control,
 )
 from src.candidate_app.models import VALID_STATUSES
@@ -107,7 +108,7 @@ def as_http_error(exc: Exception) -> HTTPException:
 
 def create_app(db_path: str | Path = DEFAULT_DB_PATH, *, seed: bool = True) -> FastAPI:
     app = FastAPI(
-        title="IDA Candidate Strategy API",
+        title="Trading Strats Candidate API",
         version="0.1.0",
         description="Candidate-only dashboard API for paper-trading promotion and review.",
     )
@@ -149,6 +150,14 @@ def create_app(db_path: str | Path = DEFAULT_DB_PATH, *, seed: bool = True) -> F
         ready()
         try:
             return connection_snapshot()
+        except Exception as exc:
+            raise as_http_error(exc) from exc
+
+    @app.get("/control-center/operations")
+    def get_operations() -> dict[str, Any]:
+        ready()
+        try:
+            return operational_snapshot()
         except Exception as exc:
             raise as_http_error(exc) from exc
 

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 import socket
+import subprocess
 from typing import Any
 
 import pandas as pd
@@ -11,9 +14,20 @@ import yaml
 
 from src.candidate_app.models import json_safe, utc_now
 from src.candidate_app.store import DEFAULT_DB_PATH, connect, list_paper_ledger_entries
+from src.execution.operational_events import DEFAULT_OPERATIONAL_EVENTS_PATH, read_recent_operational_events
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+RUNTIME_ROOT = Path(os.environ.get("TRADING_STRATS_RUNTIME_DIR", PROJECT_ROOT / "ops" / "runtime")).expanduser().resolve()
+CONTROL_CENTER_UNITS = (
+    "trading-strats-ibgateway.service",
+    "trading-strats-vnc.service",
+    "trading-strats-paper.service",
+    "trading-strats-paper-c2.service",
+    "trading-strats-control-center.service",
+)
+WATCHDOG_STATUS_PATH = Path("results/paper/ibkr_watchdog/status.yaml")
+OPERATIONAL_EVENTS_PATH = DEFAULT_OPERATIONAL_EVENTS_PATH
 
 
 @dataclass(frozen=True)
@@ -43,29 +57,30 @@ ACTIVE_PAPER_SOURCES: tuple[PaperCandidateSource, ...] = (
         mode="paper",
         symbol="QQQ",
         account="DU9782002",
-        kill_switch_path=Path("ops/kill_switches/h1c_auto_paused"),
+        kill_switch_path=RUNTIME_ROOT / "kill_switches/h1c_auto_paused",
         daemon_status_path=Path("results/paper/h1c_auto_runner/daemon_status.yaml"),
         state_path=Path("results/paper/h1c_state/state.yaml"),
         state_events_path=Path("results/paper/h1c_state/events.parquet"),
         pnl_events_path=Path("results/paper/h1c_state/pnl_events.parquet"),
         auto_runner_dir=Path("results/paper/h1c_auto_runner"),
-        config_path=Path("configs/execution/h1c_auto_runner.yaml"),
+        config_path=RUNTIME_ROOT / "h1c_auto_runner.paper.yaml",
         connection_config_path=Path("configs/execution/ibkr_paper_readonly.yaml"),
     ),
     PaperCandidateSource(
-        candidate_id="ko-defensive-paper-demo",
-        name="KO Defensive Mean Reversion",
-        strategy_id="ko_daily_defensive_reversion_demo_v1",
+        candidate_id="c2-googl-opening-bias-followthrough",
+        name="GOOGL Opening Bias Followthrough",
+        strategy_id="c2_h9_googl_5min_opening_bias_followthrough_v1",
         mode="paper",
-        symbol="KO",
-        account="DEMO-PAPER",
-        kill_switch_path=Path("ops/kill_switches/ko_demo_paused"),
-        daemon_status_path=Path("results/paper/ko_demo/daemon_status.yaml"),
-        state_path=Path("results/paper/ko_demo/state.yaml"),
-        state_events_path=Path("results/paper/ko_demo/events.parquet"),
-        pnl_events_path=Path("results/paper/ko_demo/pnl_events.parquet"),
-        auto_runner_dir=Path("results/paper/ko_demo/runs"),
-        demo=True,
+        symbol="GOOGL",
+        account="DU9782002",
+        kill_switch_path=RUNTIME_ROOT / "kill_switches/c2_auto_paused",
+        daemon_status_path=Path("results/paper/c2_auto_runner/daemon_status.yaml"),
+        state_path=Path("results/paper/c2_state/state.yaml"),
+        state_events_path=Path("results/paper/c2_state/events.parquet"),
+        pnl_events_path=Path("results/paper/c2_state/pnl_events.parquet"),
+        auto_runner_dir=Path("results/paper/c2_auto_runner"),
+        config_path=RUNTIME_ROOT / "c2_auto_runner.paper.yaml",
+        connection_config_path=Path("configs/execution/ibkr_paper_readonly_c2.yaml"),
     ),
 )
 
@@ -76,19 +91,28 @@ def resolve_workspace_path(path: str | Path, root: str | Path = PROJECT_ROOT) ->
     root_path = Path(root).resolve()
     raw = Path(path)
     resolved = raw.resolve() if raw.is_absolute() else (root_path / raw).resolve()
-    try:
-        resolved.relative_to(root_path)
-    except ValueError as exc:
-        raise ValueError(f"path is outside workspace: {path}") from exc
+    allowed_roots = (root_path, RUNTIME_ROOT)
+    if not any(_is_relative_to(resolved, allowed_root) for allowed_root in allowed_roots):
+        raise ValueError(f"path is outside workspace/runtime roots: {path}")
     return resolved
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 def workspace_relpath(path: str | Path, root: str | Path = PROJECT_ROOT) -> str:
     resolved = Path(path).resolve()
-    try:
-        return resolved.relative_to(Path(root).resolve()).as_posix()
-    except ValueError:
-        return resolved.as_posix()
+    for allowed_root in (Path(root).resolve(), RUNTIME_ROOT):
+        try:
+            return resolved.relative_to(allowed_root).as_posix()
+        except ValueError:
+            continue
+    return resolved.as_posix()
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -328,6 +352,175 @@ def normalize_ledger_events(
                 "slippage_bps": entry.get("slippage_bps"),
                 "exposure": entry.get("exposure"),
                 "notes": entry.get("notes") or "",
+            }
+        )
+    return json_safe(sorted(rows, key=lambda row: str(row.get("event_at") or ""), reverse=True))
+
+
+def optional_float(value: Any) -> float | None:
+    if value in {None, ""}:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def infer_side(*, position_side: Any = None, position_unit: Any = None, action: Any = None) -> str | None:
+    side = str(position_side or "").strip().lower()
+    if side in {"long", "short"}:
+        return side
+    unit = optional_float(position_unit)
+    if unit is not None:
+        if unit > 0:
+            return "long"
+        if unit < 0:
+            return "short"
+    action_text = str(action or "").strip().upper()
+    if action_text == "BUY":
+        return "long"
+    if action_text == "SELL":
+        return "short"
+    return None
+
+
+def current_position_snapshot(state: dict[str, Any]) -> dict[str, Any]:
+    open_position = dict(state.get("open_position") or {})
+    pending_ticket = dict(state.get("pending_ticket") or {})
+    position_side = infer_side(position_side=state.get("position_side"), position_unit=state.get("position_unit"), action=pending_ticket.get("action"))
+    quantity = optional_float(state.get("quantity")) or 0.0
+    position_unit = optional_float(state.get("position_unit")) or 0.0
+    signed_quantity = quantity * (1.0 if position_unit > 0 else -1.0 if position_unit < 0 else 0.0)
+    entry_price = optional_float(open_position.get("entry_price")) or optional_float(open_position.get("theoretical_entry_price"))
+    current: dict[str, Any] = {
+        "available": bool(state.get("available")),
+        "status": state.get("status"),
+        "symbol": state.get("symbol"),
+        "account": state.get("account"),
+        "side": position_side,
+        "quantity": quantity,
+        "signed_quantity": signed_quantity,
+        "position_unit": position_unit,
+        "desired_position_unit": optional_float(state.get("desired_position_unit")) or 0.0,
+        "entry_price": entry_price,
+        "opened_at_utc": open_position.get("opened_at_utc"),
+        "signal_timestamp": open_position.get("signal_timestamp") or pending_ticket.get("signal_timestamp") or state.get("last_signal_timestamp"),
+        "theoretical_entry_timestamp": open_position.get("theoretical_entry_timestamp") or pending_ticket.get("theoretical_entry_timestamp"),
+        "theoretical_entry_price": optional_float(open_position.get("theoretical_entry_price") or pending_ticket.get("theoretical_entry_price")),
+        "theoretical_exit_timestamp": open_position.get("theoretical_exit_timestamp") or pending_ticket.get("theoretical_exit_timestamp"),
+        "theoretical_exit_price": optional_float(open_position.get("theoretical_exit_price") or pending_ticket.get("theoretical_exit_price")),
+        "entry_slippage_bps": optional_float(open_position.get("entry_slippage_bps")),
+        "exit_rule": open_position.get("exit_rule") or pending_ticket.get("exit_rule"),
+        "horizon_bars": open_position.get("horizon_bars") or pending_ticket.get("horizon_bars"),
+        "min_hold_bars": open_position.get("min_hold_bars") or pending_ticket.get("min_hold_bars"),
+        "stop_loss_bps": optional_float(open_position.get("stop_loss_bps") or pending_ticket.get("stop_loss_bps")),
+        "take_profit_bps": optional_float(open_position.get("take_profit_bps") or pending_ticket.get("take_profit_bps")),
+        "pending_action": pending_ticket.get("action"),
+        "pending_quantity": optional_float(pending_ticket.get("quantity")),
+        "pending_status": pending_ticket.get("status"),
+        "updated_at_utc": state.get("updated_at_utc"),
+    }
+    if entry_price is not None and quantity:
+        current["notional"] = round(abs(entry_price * quantity), 6)
+    else:
+        current["notional"] = None
+    return json_safe(current)
+
+
+def position_timeline_from_state_events(events: list[dict[str, Any]], *, fallback_side: str | None = None) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for event in sorted(events, key=lambda row: str(row.get("created_at_utc") or "")):
+        event_type = str(event.get("event_type") or "")
+        quantity = optional_float(event.get("quantity"))
+        ticket_quantity = optional_float(event.get("ticket_quantity"))
+        position_unit = optional_float(event.get("position_unit")) or 0.0
+        if quantity is None:
+            quantity = ticket_quantity if event_type in {"entry_fill_marked_open", "open_position_confirmed", "pending_exit_confirmed"} else 0.0
+        side = infer_side(position_side=fallback_side, position_unit=position_unit, action=event.get("ticket_action"))
+        signed_quantity = quantity * (1.0 if position_unit > 0 else -1.0 if position_unit < 0 else 0.0)
+        is_relevant = event_type in {
+            "pending_entry_created",
+            "pending_exit_created",
+            "entry_fill_marked_open",
+            "exit_fill_marked_flat",
+            "open_position_confirmed",
+            "pending_exit_confirmed",
+        }
+        if not is_relevant:
+            continue
+        rows.append(
+            {
+                "event_at": event.get("created_at_utc"),
+                "event_type": event_type,
+                "status": event.get("new_status"),
+                "previous_status": event.get("previous_status"),
+                "action": event.get("ticket_action"),
+                "side": side,
+                "quantity": quantity,
+                "signed_quantity": signed_quantity,
+                "position_unit": position_unit,
+                "source": "state_events",
+                "state_updated": event.get("state_updated"),
+            }
+        )
+    return json_safe(sorted(rows, key=lambda row: str(row.get("event_at") or ""), reverse=True))
+
+
+def operation_history(
+    *,
+    state_events: list[dict[str, Any]],
+    pnl_events: list[dict[str, Any]],
+    fallback_side: str | None,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for event in state_events:
+        event_type = str(event.get("event_type") or "")
+        quantity = optional_float(event.get("quantity"))
+        ticket_quantity = optional_float(event.get("ticket_quantity"))
+        action = event.get("ticket_action")
+        if quantity is None:
+            quantity = ticket_quantity
+        if event_type in {"flat_no_signal", "pending_entry_kept", "pending_exit_kept", "accounting_no_change"} and action in {None, "", "NONE"}:
+            continue
+        position_unit = optional_float(event.get("position_unit")) or 0.0
+        rows.append(
+            {
+                "event_at": event.get("created_at_utc"),
+                "source": "state_events",
+                "event_type": event_type,
+                "action": action,
+                "status": event.get("new_status"),
+                "previous_status": event.get("previous_status"),
+                "side": infer_side(position_side=fallback_side, position_unit=position_unit, action=action),
+                "quantity": quantity,
+                "price": None,
+                "position_after": quantity if event.get("new_status") in {"open", "pending_exit"} else 0.0,
+                "signed_position_after": (quantity or 0.0) * (1.0 if position_unit > 0 else -1.0 if position_unit < 0 else 0.0),
+                "realized_pnl": None,
+                "slippage_bps": None,
+            }
+        )
+    for event in pnl_events:
+        event_type = str(event.get("event_type") or "")
+        entry_price = optional_float(event.get("entry_price"))
+        exit_price = optional_float(event.get("exit_price"))
+        price = exit_price if event_type == "exit" else entry_price
+        slippage = optional_float(event.get("exit_slippage_bps")) if event_type == "exit" else optional_float(event.get("entry_slippage_bps"))
+        rows.append(
+            {
+                "event_at": event.get("created_at_utc"),
+                "source": "pnl_events",
+                "event_type": event_type,
+                "action": "EXIT" if event_type == "exit" else "ENTRY" if event_type == "entry" else event_type.upper(),
+                "status": "flat" if event_type == "exit" else "open" if event_type == "entry" else None,
+                "previous_status": None,
+                "side": fallback_side,
+                "quantity": optional_float(event.get("quantity")),
+                "price": price,
+                "position_after": 0.0 if event_type == "exit" else optional_float(event.get("quantity")),
+                "signed_position_after": None,
+                "realized_pnl": optional_float(event.get("realized_pnl")),
+                "slippage_bps": slippage,
             }
         )
     return json_safe(sorted(rows, key=lambda row: str(row.get("event_at") or ""), reverse=True))
@@ -763,6 +956,222 @@ def tcp_check(host: str, port: int, timeout_seconds: float = 1.0) -> dict[str, A
         return {"ok": False, "latency_ms": round(latency_ms, 2), "error": str(exc)}
 
 
+def run_command(args: list[str], timeout_seconds: float = 2.0) -> dict[str, Any]:
+    try:
+        completed = subprocess.run(args, capture_output=True, text=True, timeout=timeout_seconds, check=False)
+    except FileNotFoundError as exc:
+        return {"ok": False, "stdout": "", "stderr": str(exc), "returncode": 127}
+    except subprocess.TimeoutExpired as exc:
+        return {"ok": False, "stdout": exc.stdout or "", "stderr": "command timed out", "returncode": None}
+    return {
+        "ok": completed.returncode == 0,
+        "stdout": completed.stdout.strip(),
+        "stderr": completed.stderr.strip(),
+        "returncode": completed.returncode,
+    }
+
+
+def systemd_unit_snapshot(unit: str) -> dict[str, Any]:
+    active = run_command(["systemctl", "is-active", unit])
+    enabled = run_command(["systemctl", "is-enabled", unit])
+    return {
+        "unit": unit,
+        "active_state": active["stdout"] or "unknown",
+        "enabled_state": enabled["stdout"] or "unknown",
+        "ok": active["stdout"] == "active",
+        "error": active["stderr"] or None,
+    }
+
+
+def uptime_seconds() -> float | None:
+    path = Path("/proc/uptime")
+    if not path.exists():
+        return None
+    try:
+        return round(float(path.read_text(encoding="utf-8").split()[0]), 3)
+    except Exception:
+        return None
+
+
+def ibkr_gateway_snapshot(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 4002,
+    expected_account: str = "DU9782002",
+) -> dict[str, Any]:
+    port_result = tcp_check(host, port, timeout_seconds=1.0)
+    snapshot: dict[str, Any] = {
+        "host": host,
+        "port": port,
+        "port_open": bool(port_result.get("ok")),
+        "latency_ms": port_result.get("latency_ms"),
+        "expected_account": expected_account,
+        "managed_accounts": [],
+        "account_ok": False,
+        "server_time": None,
+        "ok": False,
+        "error": port_result.get("error"),
+    }
+    if not port_result.get("ok"):
+        return snapshot
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        from ib_insync import IB
+
+        ib = IB()
+        try:
+            ib.connect(host, port, clientId=91, timeout=3)
+            accounts = list(ib.managedAccounts())
+            server_time = ib.reqCurrentTime()
+        finally:
+            if ib.isConnected():
+                ib.disconnect()
+            asyncio.set_event_loop(None)
+            loop.close()
+        snapshot.update(
+            {
+                "managed_accounts": accounts,
+                "account_ok": expected_account in accounts,
+                "server_time": str(server_time),
+                "ok": expected_account in accounts,
+                "error": None if expected_account in accounts else f"expected account {expected_account} not in managed accounts",
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        snapshot.update({"ok": False, "error": repr(exc)})
+        asyncio.set_event_loop(None)
+        loop.close()
+    return snapshot
+
+
+def daemon_file_health(source: PaperCandidateSource, root_path: Path) -> dict[str, Any]:
+    if source.demo:
+        return {"available": True, "ok": True, "mtime_utc": "2026-05-17T10:00:00Z", "age_seconds": None}
+    path = resolve_workspace_path(source.daemon_status_path, root_path)
+    if not path.exists():
+        return {"available": False, "ok": False, "path": workspace_relpath(path, root_path), "error": "missing daemon status file"}
+    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    age_seconds = max(0.0, (datetime.now(timezone.utc) - mtime).total_seconds())
+    payload = read_yaml(path)
+    error_streak = int(payload.get("error_streak") or 0) if "_read_error" not in payload else 1
+    return {
+        "available": "_read_error" not in payload,
+        "ok": "_read_error" not in payload and error_streak == 0 and age_seconds < 1800,
+        "path": workspace_relpath(path, root_path),
+        "mtime_utc": mtime.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "age_seconds": round(age_seconds, 3),
+        "error_streak": error_streak,
+        "scheduler_reason": dict(payload.get("scheduler", {}) or {}).get("reason"),
+        "last_decision": dict(payload.get("runner_summary", {}) or {}).get("decision"),
+        "error": payload.get("_read_error") or payload.get("error"),
+    }
+
+
+def watchdog_file_health(root_path: Path, *, max_age_seconds: int = 180) -> dict[str, Any]:
+    path = resolve_workspace_path(WATCHDOG_STATUS_PATH, root_path)
+    if not path.exists():
+        return {
+            "available": False,
+            "ok": False,
+            "path": workspace_relpath(path, root_path),
+            "error": "missing watchdog status file",
+        }
+    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    age_seconds = max(0.0, (datetime.now(timezone.utc) - mtime).total_seconds())
+    payload = read_yaml(path)
+    checks = list(payload.get("checks", []) or []) if "_read_error" not in payload else []
+    failed = [str(check.get("name") or check.get("config_path") or "target") for check in checks if not check.get("ok")]
+    ok = "_read_error" not in payload and bool(payload.get("ok")) and age_seconds <= max_age_seconds
+    return {
+        "available": "_read_error" not in payload,
+        "ok": ok,
+        "path": workspace_relpath(path, root_path),
+        "mtime_utc": mtime.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "age_seconds": round(age_seconds, 3),
+        "status": payload.get("status"),
+        "action": payload.get("action"),
+        "message": payload.get("_read_error") or payload.get("message"),
+        "failed_targets": failed,
+        "check_count": len(checks),
+        "error": payload.get("_read_error") or (", ".join(failed) if failed else None),
+    }
+
+
+def operational_events_health(root_path: Path, *, limit: int = 12) -> dict[str, Any]:
+    path = resolve_workspace_path(OPERATIONAL_EVENTS_PATH, root_path)
+    if not path.exists():
+        return {
+            "available": True,
+            "ok": True,
+            "path": workspace_relpath(path, root_path),
+            "recent": [],
+            "latest": None,
+            "count_returned": 0,
+        }
+    try:
+        recent = read_recent_operational_events(path, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "available": False,
+            "ok": False,
+            "path": workspace_relpath(path, root_path),
+            "recent": [],
+            "latest": None,
+            "count_returned": 0,
+            "error": repr(exc),
+        }
+    return {
+        "available": True,
+        "ok": True,
+        "path": workspace_relpath(path, root_path),
+        "recent": json_safe(recent),
+        "latest": json_safe(recent[0]) if recent else None,
+        "count_returned": len(recent),
+    }
+
+
+def operational_snapshot(*, root: str | Path = PROJECT_ROOT) -> dict[str, Any]:
+    root_path = Path(root).resolve()
+    primary = ACTIVE_PAPER_SOURCES[0]
+    systemd = [systemd_unit_snapshot(unit) for unit in CONTROL_CENTER_UNITS]
+    daemon = daemon_file_health(primary, root_path)
+    watchdog = watchdog_file_health(root_path)
+    events = operational_events_health(root_path)
+    ibkr = ibkr_gateway_snapshot(expected_account=primary.account or "")
+    runtime_config = read_yaml(resolve_workspace_path(primary.config_path, root_path)) if primary.config_path else {}
+    optional_units = {"trading-strats-control-center.service"}
+    service_ok = all(unit.get("ok") for unit in systemd if unit["unit"] not in optional_units)
+    ok = bool(service_ok and ibkr.get("ok") and daemon.get("ok") and watchdog.get("ok") and "_read_error" not in runtime_config)
+    return {
+        "status": "ok" if ok else "degraded",
+        "ok": ok,
+        "host": {
+            "hostname": socket.gethostname(),
+            "uptime_seconds": uptime_seconds(),
+            "runtime_root": RUNTIME_ROOT.as_posix(),
+            "project_root": root_path.as_posix(),
+        },
+        "systemd": systemd,
+        "ibkr": ibkr,
+        "daemon": daemon,
+        "watchdog": watchdog,
+        "events": events,
+        "runtime": {
+            "config_path": workspace_relpath(primary.config_path, root_path) if primary.config_path else None,
+            "kill_switch_path": workspace_relpath(primary.kill_switch_path, root_path),
+            "config_loaded": "_read_error" not in runtime_config,
+            "config_error": runtime_config.get("_read_error"),
+            "enabled": dict(runtime_config.get("auto", {}) or {}).get("enabled"),
+            "capital_fraction": dict(runtime_config.get("auto", {}) or {}).get("capital_fraction"),
+            "max_order_notional_usd": dict(runtime_config.get("auto", {}) or {}).get("max_order_notional_usd"),
+            "execute_orders": dict(runtime_config.get("auto", {}) or {}).get("execute_orders"),
+            "transmit_orders": dict(runtime_config.get("auto", {}) or {}).get("transmit_orders"),
+        },
+        "updated_at_utc": utc_now(),
+    }
+
+
 def connection_snapshot(*, root: str | Path = PROJECT_ROOT) -> dict[str, Any]:
     root_path = Path(root).resolve()
     checks: list[dict[str, Any]] = []
@@ -834,6 +1243,7 @@ def connection_snapshot(*, root: str | Path = PROJECT_ROOT) -> dict[str, Any]:
         "ok_count": ok_count,
         "check_count": len(all_checks),
         "checks": all_checks,
+        "operations": operational_snapshot(root=root_path),
         "updated_at_utc": utc_now(),
     }
 
@@ -894,8 +1304,10 @@ def candidate_control_snapshot(
             "signal_timestamp",
             "ticket_action",
             "ticket_quantity",
+            "quantity",
             "desired_position_unit",
             "position_unit",
+            "reconciliation_decision",
             "state_updated",
         ]
         if column in state_event_frame.columns
@@ -910,8 +1322,12 @@ def candidate_control_snapshot(
     curve = pnl_curve_from_events(pnl_events)
     manual_ledger = list_manual_ledger(source, db_path=db_path)
     manual_curve = curve_from_manual_ledger(manual_ledger)
-    primary_curve = curve or manual_curve
-    ledger_rows = normalize_ledger_events(artifact_events=pnl_events, manual_entries=manual_ledger)
+    ledger_rows = normalize_ledger_events(artifact_events=pnl_events, manual_entries=[])
+    manual_ledger_rows = normalize_ledger_events(artifact_events=[], manual_entries=manual_ledger)
+    position = current_position_snapshot(state)
+    fallback_side = str(position.get("side") or "").lower() or None
+    position_timeline = position_timeline_from_state_events(state_events, fallback_side=fallback_side)
+    operations = operation_history(state_events=state_events, pnl_events=pnl_events, fallback_side=fallback_side)
     latest_run = runs[0] if runs else None
     kill_switch_exists = kill_switch_path.exists()
     runtime_control = read_runtime_control(source, db_path=db_path, kill_switch_exists=kill_switch_exists, root=root_path)
@@ -921,7 +1337,7 @@ def candidate_control_snapshot(
         daemon=daemon,
         state=state,
         latest_run=latest_run,
-        pnl_log_available=pnl_events_path.exists() or bool(manual_ledger),
+        pnl_log_available=pnl_events_path.exists(),
     )
 
     return {
@@ -934,7 +1350,7 @@ def candidate_control_snapshot(
         "overall_state": overall_state(alerts, daemon),
         "control": {
             "kill_switch_exists": kill_switch_exists,
-            "kill_switch_path": source.kill_switch_path.as_posix(),
+            "kill_switch_path": workspace_relpath(source.kill_switch_path, root_path),
             "pause_enabled": not kill_switch_exists,
             "resume_enabled": kill_switch_exists,
             "runtime": runtime_control,
@@ -942,21 +1358,34 @@ def candidate_control_snapshot(
         },
         "daemon": json_safe(daemon),
         "state": json_safe(state),
+        "position": {
+            "current": position,
+            "timeline": position_timeline,
+        },
+        "operations": operations,
         "latest_run": latest_run,
         "recent_runs": runs,
         "state_events": state_events,
         "pnl": {
-            **pnl_metrics(primary_curve),
-            "source_available": pnl_events_path.exists() or bool(manual_ledger),
-            "source_type": "runner_pnl_events" if pnl_events_path.exists() else "manual_ledger",
-            "source_path": source.pnl_events_path.as_posix() if pnl_events_path.exists() else "candidate_paper_ledger",
-            "curve": primary_curve,
+            **pnl_metrics(curve),
+            "source_available": pnl_events_path.exists(),
+            "source_type": "runner_pnl_events",
+            "source_path": source.pnl_events_path.as_posix(),
+            "curve": curve,
             "events": pnl_events,
+            "manual_ledger_affects_pnl": False,
+            "excluded_manual_ledger_count": len(manual_ledger),
         },
         "ledger": {
             "events": ledger_rows,
-            "manual_count": len(manual_ledger),
+            "manual_count": 0,
             "artifact_count": len(pnl_events),
+        },
+        "manual_ledger": {
+            "events": manual_ledger_rows,
+            "count": len(manual_ledger),
+            "metrics": pnl_metrics(manual_curve),
+            "affects_operational_pnl": False,
         },
         "market": market_snapshot(source, ledger_rows),
         "alerts": alerts,
@@ -975,8 +1404,9 @@ def control_center_snapshot(
     critical = sum(1 for candidate in all_candidates for alert in candidate["alerts"] if alert["severity"] == "critical")
     warnings = sum(1 for candidate in all_candidates for alert in candidate["alerts"] if alert["severity"] == "warning")
     paused = sum(1 for candidate in all_candidates if candidate["control"]["kill_switch_exists"])
+    connection = connection_snapshot(root=root)
     return {
-        "title": "Paper/Live Control Center",
+        "title": "Trading Strats Control Center",
         "active_candidates": all_candidates,
         "sections": {
             "paper": candidates,
@@ -990,7 +1420,8 @@ def control_center_snapshot(
             "critical_alerts": critical,
             "warning_alerts": warnings,
         },
-        "connection": connection_snapshot(root=root),
+        "connection": connection,
+        "operations": connection.get("operations", {}),
         "updated_at_utc": utc_now(),
     }
 

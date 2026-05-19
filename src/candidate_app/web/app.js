@@ -25,6 +25,9 @@ function text(value) {
 }
 
 function number(value, digits = 2) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return "-";
@@ -33,6 +36,9 @@ function number(value, digits = 2) {
 }
 
 function money(value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return "-";
@@ -42,6 +48,9 @@ function money(value) {
 }
 
 function pct(value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return "-";
@@ -60,6 +69,23 @@ function compactMoney(value) {
     return `${sign}$${(absolute / 1000).toFixed(1)}k`;
   }
   return `${sign}$${absolute.toFixed(2)}`;
+}
+
+function duration(seconds) {
+  const numeric = Number(seconds);
+  if (!Number.isFinite(numeric)) {
+    return "-";
+  }
+  if (numeric < 60) {
+    return `${Math.round(numeric)}s`;
+  }
+  if (numeric < 3600) {
+    return `${Math.round(numeric / 60)}m`;
+  }
+  if (numeric < 86400) {
+    return `${Math.round(numeric / 3600)}h`;
+  }
+  return `${Math.round(numeric / 86400)}d`;
 }
 
 function tooltipAttr(lines) {
@@ -130,13 +156,77 @@ function renderSummary() {
 
 function renderConnections() {
   const connection = state.snapshot?.connection || { checks: [] };
+  const operations = state.snapshot?.operations || connection.operations || {};
+  const ibkr = operations.ibkr || {};
+  const daemon = operations.daemon || {};
+  const watchdog = operations.watchdog || {};
+  const events = operations.events || {};
+  const latestEvent = events.latest || {};
+  const runtime = operations.runtime || {};
+  const host = operations.host || {};
+  const units = operations.systemd || [];
   byId("candidate-title").textContent = "Conexión / VPN";
-  byId("candidate-subtitle").textContent = `${connection.ok_count || 0}/${connection.check_count || 0} checks OK · ${connection.status || "unknown"}`;
-  setSystemBadge(connection.status === "ok" ? "running" : "attention");
+  byId("candidate-subtitle").textContent = `${operations.status || connection.status || "unknown"} · ${host.hostname || "host unknown"} · uptime ${duration(host.uptime_seconds)}`;
+  setSystemBadge((operations.status || connection.status) === "ok" ? "running" : "attention");
   byId("alerts-panel").innerHTML = "";
   byId("strategy-view").style.display = "none";
   byId("connection-view").classList.add("is-active");
-  byId("connection-view").innerHTML = (connection.checks || [])
+  const operationCards = `
+    <article class="connection-card">
+      <span class="badge ${operations.ok ? "running" : "attention"}">${operations.status || "unknown"}</span>
+      <strong>VPS</strong>
+      <span class="muted">${escapeHtml(host.hostname || "-")}</span>
+      <span>uptime ${escapeHtml(duration(host.uptime_seconds))}</span>
+      <span class="muted">${escapeHtml(host.runtime_root || "")}</span>
+    </article>
+    <article class="connection-card">
+      <span class="badge ${ibkr.ok ? "running" : "blocked"}">${ibkr.ok ? "OK" : "FAIL"}</span>
+      <strong>IB Gateway</strong>
+      <span class="muted">${escapeHtml(`${ibkr.host || "127.0.0.1"}:${ibkr.port || 4002}`)}</span>
+      <span>${escapeHtml((ibkr.managed_accounts || []).join(", ") || ibkr.error || "-")}</span>
+      <span class="muted">expected ${escapeHtml(ibkr.expected_account || "-")} · ${number(ibkr.latency_ms, 2)} ms</span>
+    </article>
+    <article class="connection-card">
+      <span class="badge ${daemon.ok ? "running" : "attention"}">${daemon.ok ? "OK" : "STALE"}</span>
+      <strong>Paper daemon</strong>
+      <span class="muted">${escapeHtml(daemon.path || "-")}</span>
+      <span>${escapeHtml(daemon.last_decision || daemon.scheduler_reason || daemon.error || "-")}</span>
+      <span class="muted">age ${escapeHtml(duration(daemon.age_seconds))} · errors ${escapeHtml(daemon.error_streak ?? "-")}</span>
+    </article>
+    <article class="connection-card">
+      <span class="badge ${watchdog.ok ? "running" : "blocked"}">${watchdog.ok ? "OK" : "FAIL"}</span>
+      <strong>IBKR watchdog</strong>
+      <span class="muted">${escapeHtml(watchdog.path || "-")}</span>
+      <span>${escapeHtml(watchdog.message || watchdog.error || "-")}</span>
+      <span class="muted">age ${escapeHtml(duration(watchdog.age_seconds))} · checks ${escapeHtml(watchdog.check_count ?? "-")}</span>
+    </article>
+    <article class="connection-card">
+      <span class="badge ${events.ok ? "running" : "blocked"}">${events.count_returned ? "LOG" : "EMPTY"}</span>
+      <strong>Incident log</strong>
+      <span class="muted">${escapeHtml(events.path || "-")}</span>
+      <span>${escapeHtml(latestEvent.event_type || "sin incidencias registradas")}</span>
+      <span class="muted">${escapeHtml(latestEvent.created_at_utc || "")} ${escapeHtml(latestEvent.component || "")}</span>
+    </article>
+    <article class="connection-card">
+      <span class="badge ${runtime.config_loaded ? "running" : "blocked"}">${runtime.config_loaded ? "LOADED" : "FAIL"}</span>
+      <strong>Runtime config</strong>
+      <span class="muted">${escapeHtml(runtime.config_path || "-")}</span>
+      <span>orders ${runtime.execute_orders ? "on" : "off"} · transmit ${runtime.transmit_orders ? "on" : "off"}</span>
+      <span class="muted">capital ${escapeHtml(runtime.capital_fraction ?? "-")} · cap ${escapeHtml(runtime.max_order_notional_usd ?? "none")}</span>
+    </article>
+  `;
+  const unitCards = units
+    .map(
+      (unit) => `
+        <article class="connection-card">
+          <span class="badge ${unit.ok ? "running" : "blocked"}">${escapeHtml(unit.active_state || "unknown")}</span>
+          <strong>${escapeHtml(unit.unit || "-")}</strong>
+          <span class="muted">enabled: ${escapeHtml(unit.enabled_state || "-")}</span>
+          <span>${escapeHtml(unit.error || "")}</span>
+        </article>`
+    )
+    .join("");
+  const checkCards = (connection.checks || [])
     .map(
       (check) => `
         <article class="connection-card">
@@ -147,7 +237,8 @@ function renderConnections() {
           <span class="muted">${escapeHtml(check.config_path || check.mtime_utc || "")}</span>
         </article>`
     )
-    .join("") || `<article class="connection-card muted">Sin checks configurados</article>`;
+    .join("");
+  byId("connection-view").innerHTML = operationCards + unitCards + (checkCards || `<article class="connection-card muted">Sin checks configurados</article>`);
 }
 
 function renderAlerts(candidate) {
@@ -320,6 +411,51 @@ function renderFacts(candidate) {
   byId("daemon-updated").textContent = text(daemon.mtime_utc).slice(0, 19);
 }
 
+function renderPosition(candidate) {
+  const position = candidate.position?.current || {};
+  const pending = position.pending_action
+    ? `${text(position.pending_action)} ${number(position.pending_quantity, 0)} · ${text(position.pending_status)}`
+    : "-";
+  const facts = [
+    ["Status", text(position.status).toUpperCase()],
+    ["Side", text(position.side).toUpperCase()],
+    ["Qty", number(position.quantity, 0)],
+    ["Signed qty", number(position.signed_quantity, 0)],
+    ["Entry", position.entry_price === null || position.entry_price === undefined ? "-" : `$${number(position.entry_price, 2)}`],
+    ["Notional", money(position.notional)],
+    ["Opened", text(position.opened_at_utc).slice(0, 19)],
+    ["Signal", text(position.signal_timestamp).slice(0, 19)],
+    ["Exit target", text(position.theoretical_exit_timestamp).slice(0, 19)],
+    ["Exit price", position.theoretical_exit_price === null || position.theoretical_exit_price === undefined ? "-" : `$${number(position.theoretical_exit_price, 2)}`],
+    ["TP / SL", `${number(position.take_profit_bps, 1)} / ${number(position.stop_loss_bps, 1)} bps`],
+    ["Pending", pending],
+  ];
+  byId("position-facts").innerHTML = facts
+    .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`)
+    .join("");
+  byId("position-updated").textContent = text(position.updated_at_utc).slice(0, 19);
+}
+
+function renderOperations(candidate) {
+  const rows = (candidate.operations || []).slice(0, 80).map((event) => {
+    const positionAfter = event.signed_position_after ?? event.position_after;
+    return `
+      <tr>
+        <td>${escapeHtml(text(event.event_at).slice(0, 19))}</td>
+        <td>${escapeHtml(text(event.source))}</td>
+        <td>${escapeHtml(text(event.event_type))}</td>
+        <td>${escapeHtml(text(event.action))}</td>
+        <td>${escapeHtml(text(event.previous_status))} → ${escapeHtml(text(event.status))}</td>
+        <td>${escapeHtml(text(event.side))}</td>
+        <td>${number(event.quantity, 0)}</td>
+        <td>${event.price === null || event.price === undefined ? "-" : number(event.price, 2)}</td>
+        <td>${number(positionAfter, 0)}</td>
+        <td>${money(event.realized_pnl)}</td>
+      </tr>`;
+  });
+  byId("operation-rows").innerHTML = rows.join("") || `<tr><td colspan="10" class="muted">Sin operaciones registradas todavía</td></tr>`;
+}
+
 function renderRuns(candidate) {
   const rows = (candidate.recent_runs || []).slice(0, 30).map((run) => {
     const recon = run.pre_trade_reconciliation || run.post_execution_reconciliation || "-";
@@ -347,7 +483,7 @@ function renderStateEvents(candidate) {
         <td>${escapeHtml(text(event.event_type))}</td>
         <td>${escapeHtml(text(event.previous_status))} → ${escapeHtml(text(event.new_status))}</td>
         <td>${escapeHtml(text(event.ticket_action))}</td>
-        <td>${number(event.ticket_quantity, 0)}</td>
+        <td>${number(event.ticket_quantity ?? event.quantity, 0)}</td>
         <td>${escapeHtml(text(event.state_updated))}</td>
       </tr>`
   );
@@ -371,6 +507,28 @@ function renderLedger(candidate) {
       </tr>`
   );
   byId("ledger-rows").innerHTML = rows.join("") || `<tr><td colspan="10" class="muted">Sin eventos de ledger para esta estrategia</td></tr>`;
+}
+
+function renderManualLedger(candidate) {
+  const manual = candidate.manual_ledger || {};
+  const rows = (manual.events || []).slice(0, 80).map(
+    (entry) => `
+      <tr>
+        <td>${escapeHtml(text(entry.event_at).slice(0, 19))}</td>
+        <td>${escapeHtml(text(entry.event_type))}</td>
+        <td>${escapeHtml(text(entry.symbol))}</td>
+        <td>${escapeHtml(text(entry.side))}</td>
+        <td>${number(entry.quantity, 0)}</td>
+        <td>${number(entry.price, 2)}</td>
+        <td>${money(entry.net_pnl)}</td>
+        <td>${money(entry.exposure)}</td>
+        <td>${escapeHtml(text(entry.notes))}</td>
+      </tr>`
+  );
+  const metrics = manual.metrics || {};
+  byId("manual-ledger-note").textContent = `${number(manual.count || 0, 0)} entradas · PnL manual ${money(metrics.realized_pnl)} · no afecta al PnL operativo`;
+  byId("manual-ledger-rows").innerHTML =
+    rows.join("") || `<tr><td colspan="9" class="muted">Sin entradas manuales para esta estrategia</td></tr>`;
 }
 
 function syncCapitalBasis() {
@@ -413,6 +571,7 @@ function renderCandidate() {
   const daemon = candidate.daemon || {};
   const scheduler = daemon.scheduler || {};
   const paperState = candidate.state || {};
+  const position = candidate.position?.current || {};
   const latestRun = candidate.latest_run || {};
   const pnl = candidate.pnl || {};
   const market = candidate.market || {};
@@ -427,12 +586,15 @@ function renderCandidate() {
 
   byId("state-card-label").textContent = `${candidate.mode || "strategy"} state`;
   byId("paper-state").textContent = text(paperState.status).toUpperCase();
-  byId("paper-position").textContent = `${text(paperState.symbol)} qty ${number(paperState.quantity, 0)} · desired ${number(paperState.desired_position_unit, 1)}`;
+  byId("paper-position").textContent = `${text(position.symbol || paperState.symbol)} ${text(position.side).toUpperCase()} qty ${number(position.quantity ?? paperState.quantity, 0)} · signed ${number(position.signed_quantity, 0)} · desired ${number(position.desired_position_unit ?? paperState.desired_position_unit, 1)}`;
   byId("last-decision").textContent = text(latestRun.decision).toUpperCase();
   byId("last-run-time").textContent = `${text(latestRun.created_at_utc).slice(0, 19)} · ${text(latestRun.reason)}`;
   byId("pnl-realized").textContent = money(pnl.realized_pnl);
   byId("pnl-detail").textContent = `${number(pnl.event_count, 0)} events · win ${pct(pnl.win_rate)} · DD ${money(pnl.max_drawdown)}`;
-  byId("pnl-source").textContent = pnl.source_available ? `${text(pnl.source_type)} · ${text(pnl.source_path)}` : "PnL log missing";
+  const excludedManual = Number(pnl.excluded_manual_ledger_count || 0);
+  byId("pnl-source").textContent = pnl.source_available
+    ? `${text(pnl.source_type)} · ${text(pnl.source_path)}${excludedManual ? ` · manual excluido: ${excludedManual}` : ""}`
+    : `PnL log missing${excludedManual ? ` · manual excluido: ${excludedManual}` : ""}`;
   byId("pnl-chart").innerHTML = lineChart(pnl.curve || []);
   byId("market-source").textContent = `${text(market.symbol)} · ${text(market.source)}`;
   byId("market-chart").innerHTML = priceChart(market.series || []);
@@ -444,10 +606,13 @@ function renderCandidate() {
   byId("capital-status").textContent = `${runtime.updated_by || "config"} · ${runtime.updated_at || "current config"} · effective ${control.effective_enabled ? "on" : "off"}`;
 
   renderAlerts(candidate);
+  renderPosition(candidate);
+  renderOperations(candidate);
   renderFacts(candidate);
   renderRuns(candidate);
   renderStateEvents(candidate);
   renderLedger(candidate);
+  renderManualLedger(candidate);
 }
 
 async function refresh() {
@@ -476,7 +641,7 @@ async function saveRuntimeControl(event) {
       apply_to_config: byId("apply-config").checked,
     }),
   });
-  byId("apply-config").checked = false;
+  byId("apply-config").checked = true;
   await refresh();
 }
 

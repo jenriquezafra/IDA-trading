@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>IDA Paper/Live Control Center</title>
-    <link rel="stylesheet" href="/static/styles.css?v=paper-live-control4" />
+    <title>Trading Strats Control Center</title>
+    <link rel="stylesheet" href="/static/styles.css?v=paper-live-control7" />
   </head>
   <body>
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">IDA</div>
+        <div class="brand-mark">TS</div>
         <div>
-          <h1>Paper/Live Control</h1>
+          <h1>Trading Strats</h1>
           <span id="system-state" class="state-pill">loading</span>
         </div>
       </div>
@@ -34,7 +34,7 @@
     <main class="shell">
       <header class="topbar">
         <div class="title-block">
-          <p class="eyebrow">Paper/live only</p>
+          <p class="eyebrow">Control center</p>
           <h2 id="candidate-title">Centro de control</h2>
           <p id="candidate-subtitle" class="muted">Estado operativo, capital, alertas, ledger y controles.</p>
         </div>
@@ -110,14 +110,22 @@
             </select>
           </label>
           <label class="checkbox-label">
-            <input id="apply-config" type="checkbox" />
-            Aplicar a config runner
+            <input id="apply-config" type="checkbox" checked />
+            Aplicar a runtime VPS
           </label>
           <button class="secondary-button" type="submit">Guardar control</button>
         </form>
       </section>
 
       <section class="dashboard-grid">
+        <div class="panel position-panel">
+          <div class="panel-head">
+            <h3>Posición actual</h3>
+            <span id="position-updated" class="muted"></span>
+          </div>
+          <dl id="position-facts" class="facts"></dl>
+        </div>
+
         <div class="panel market-panel">
           <div class="panel-head">
             <h3>Precio y señales</h3>
@@ -145,6 +153,31 @@
             <span id="daemon-updated" class="muted"></span>
           </div>
           <dl id="daemon-facts" class="facts"></dl>
+        </div>
+      </section>
+
+      <section class="table-section">
+        <div class="panel-head">
+          <h3>Operaciones y posición</h3>
+        </div>
+        <div class="table-panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Fuente</th>
+                <th>Evento</th>
+                <th>Acción</th>
+                <th>Estado</th>
+                <th>Side</th>
+                <th>Qty</th>
+                <th>Precio</th>
+                <th>Posición después</th>
+                <th>PnL</th>
+              </tr>
+            </thead>
+            <tbody id="operation-rows"></tbody>
+          </table>
         </div>
       </section>
 
@@ -195,6 +228,7 @@
       <section class="table-section">
         <div class="panel-head">
           <h3>Ledger operativo</h3>
+          <span class="muted">solo eventos reales del daemon</span>
         </div>
         <div class="table-panel">
           <table>
@@ -216,11 +250,36 @@
           </table>
         </div>
       </section>
+
+      <section class="table-section">
+        <div class="panel-head">
+          <h3>Ledger manual / review</h3>
+          <span id="manual-ledger-note" class="muted"></span>
+        </div>
+        <div class="table-panel manual-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Evento</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Qty</th>
+                <th>Price</th>
+                <th>Net PnL manual</th>
+                <th>Exposure</th>
+                <th>Notas</th>
+              </tr>
+            </thead>
+            <tbody id="manual-ledger-rows"></tbody>
+          </table>
+        </div>
+      </section>
       </section>
     </main>
 
     <div id="chart-tooltip" class="chart-tooltip" hidden></div>
 
-    <script src="/static/app.js?v=paper-live-control4"></script>
+    <script src="/static/app.js?v=paper-live-control6"></script>
   </body>
 </html>
