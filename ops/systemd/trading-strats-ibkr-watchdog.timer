@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Trading Strats IBKR Gateway watchdog every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=trading-strats-ibkr-watchdog.service
+
+[Install]
+WantedBy=timers.target

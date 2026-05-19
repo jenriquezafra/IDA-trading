@@ -1,0 +1,21 @@
+[Unit]
+Description=Trading Strats IB Gateway GUI session
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/trading-strats
+Environment=HOME=/home/trader
+Environment=TRADING_STRATS_DISPLAY=:99
+Environment=TRADING_STRATS_SCREEN=1280x900x24
+ExecStart=/opt/trading-strats/bin/trading-strats-ibgateway-session.sh
+Restart=always
+RestartSec=20
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+watchdog:
+  targets:
+    - name: h1c-paper
+      config_path: configs/execution/ibkr_paper_readonly.yaml
+    - name: c2-paper
+      config_path: configs/execution/ibkr_paper_readonly_c2.yaml
+
+outputs:
+  output_dir: results/paper/ibkr_watchdog
+  status_path: results/paper/ibkr_watchdog/status.yaml
+  events_path: results/paper/operational_events/events.jsonl

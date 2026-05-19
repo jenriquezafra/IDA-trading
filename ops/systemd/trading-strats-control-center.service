@@ -1,0 +1,19 @@
+[Unit]
+Description=Trading Strats control center app
+Wants=network-online.target
+After=network-online.target trading-strats-paper.service
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/trading-strats/app
+Environment=PYTHONUNBUFFERED=1
+Environment=TRADING_STRATS_RUNTIME_DIR=/opt/trading-strats/runtime
+ExecStart=/opt/trading-strats/app/.venv/bin/uvicorn src.candidate_app.api:create_app --factory --host 127.0.0.1 --port 8700
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

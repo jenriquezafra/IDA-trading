@@ -11,6 +11,7 @@ import pandas as pd
 import yaml
 
 from src.execution.h1c_auto_runner import run_h1c_auto
+from src.execution.operational_events import DEFAULT_OPERATIONAL_EVENTS_PATH, append_operational_event
 from src.execution.paper_state_store import utc_now
 
 
@@ -31,6 +32,7 @@ class H1CAutoDaemonConfig:
     skip_download: bool
     output_dir: Path
     status_path: Path
+    events_path: Path
 
     @classmethod
     def from_mapping(cls, raw: dict[str, Any]) -> "H1CAutoDaemonConfig":
@@ -49,6 +51,7 @@ class H1CAutoDaemonConfig:
             skip_download=bool(daemon.get("skip_download", False)),
             output_dir=Path(outputs.get("output_dir", "results/paper/h1c_auto_runner")),
             status_path=Path(outputs.get("status_path", "results/paper/h1c_auto_runner/daemon_status.yaml")),
+            events_path=Path(outputs.get("events_path", DEFAULT_OPERATIONAL_EVENTS_PATH)),
         )
         config.validate()
         return config
@@ -68,12 +71,15 @@ class H1CAutoDaemonConfig:
             raise ValueError("max_error_sleep_seconds must be >= error_sleep_seconds")
         if not self.calendar:
             raise ValueError("calendar is required")
+        if not self.events_path.as_posix():
+            raise ValueError("events_path is required")
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["auto_runner_config_path"] = self.auto_runner_config_path.as_posix()
         data["output_dir"] = self.output_dir.as_posix()
         data["status_path"] = self.status_path.as_posix()
+        data["events_path"] = self.events_path.as_posix()
         return data
 
 
@@ -234,6 +240,51 @@ def write_status(path: str | Path, payload: dict[str, Any]) -> None:
     status_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
+def record_daemon_event(
+    config: H1CAutoDaemonConfig,
+    *,
+    component: str,
+    event_type: str,
+    severity: str,
+    status: dict[str, Any],
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    event = {
+        "event_type": event_type,
+        "component": component,
+        "severity": severity,
+        "status_path": config.status_path.as_posix(),
+        "error_streak": status.get("error_streak"),
+        "sleep_seconds": status.get("sleep_seconds") or dict(status.get("scheduler", {}) or {}).get("sleep_seconds"),
+        "iteration_started_at_utc": status.get("iteration_started_at_utc"),
+    }
+    if "error" in status:
+        event["error"] = status.get("error")
+        event["error_type"] = status.get("error_type")
+    if extra:
+        event.update(extra)
+    try:
+        return append_operational_event(event, path=config.events_path)
+    except Exception as exc:  # noqa: BLE001
+        print(
+            json.dumps(
+                {
+                    "event_type": "operational_event_write_failed",
+                    "component": component,
+                    "severity": "critical",
+                    "error": repr(exc),
+                    "intended_event_type": event_type,
+                    "status_path": config.status_path.as_posix(),
+                    "created_at_utc": utc_now(),
+                },
+                sort_keys=True,
+                default=str,
+            ),
+            flush=True,
+        )
+        return None
+
+
 def run_daemon(
     *,
     config_path: str | Path = DEFAULT_CONFIG_PATH,
@@ -248,6 +299,7 @@ def run_daemon(
         started = utc_now()
         iteration_started_monotonic = time.perf_counter()
         try:
+            previous_error_streak = error_streak
             decision = next_scan_decision(pd.Timestamp.now(tz="UTC"), config)
             runner_summary: dict[str, Any] = {}
             runner_paths: dict[str, str] = {}
@@ -280,6 +332,18 @@ def run_daemon(
                 "config": config.to_dict(),
             }
             write_status(config.status_path, status)
+            if previous_error_streak > 0:
+                event = record_daemon_event(
+                    config,
+                    component="h1c_auto_daemon",
+                    event_type="daemon_recovered",
+                    severity="info",
+                    status=status,
+                    extra={"previous_error_streak": previous_error_streak},
+                )
+                if event:
+                    status["event"] = {"recorded": True, "event_id": event["event_id"], "event_type": event["event_type"]}
+                    write_status(config.status_path, status)
             print(json.dumps(status, sort_keys=True, default=str), flush=True)
             if once or (max_iterations is not None and iterations >= max_iterations):
                 return
@@ -298,6 +362,16 @@ def run_daemon(
                 "config": config.to_dict(),
             }
             write_status(config.status_path, status)
+            event = record_daemon_event(
+                config,
+                component="h1c_auto_daemon",
+                event_type="daemon_error",
+                severity="critical" if error_streak >= 3 else "warning",
+                status=status,
+            )
+            if event:
+                status["event"] = {"recorded": True, "event_id": event["event_id"], "event_type": event["event_type"]}
+                write_status(config.status_path, status)
             print(json.dumps(status, sort_keys=True, default=str), flush=True)
             if once or (max_iterations is not None and iterations >= max_iterations):
                 return

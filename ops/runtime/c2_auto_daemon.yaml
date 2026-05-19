@@ -1,8 +1,8 @@
 daemon:
-  auto_runner_config_path: configs/execution/h1c_auto_runner.yaml
-  open_scan_interval_seconds: 900
+  auto_runner_config_path: /opt/trading-strats/runtime/c2_auto_runner.paper.yaml
+  open_scan_interval_seconds: 60
   pre_open_wakeup_minutes: 15
-  pre_open_scan_interval_seconds: 900
+  pre_open_scan_interval_seconds: 60
   active_reconciliation_interval_seconds: 60
   error_sleep_seconds: 300
   max_error_sleep_seconds: 900
@@ -11,6 +11,6 @@ daemon:
   skip_download: false
 
 outputs:
-  output_dir: results/paper/h1c_auto_runner
-  status_path: results/paper/h1c_auto_runner/daemon_status.yaml
+  output_dir: results/paper/c2_auto_runner
+  status_path: results/paper/c2_auto_runner/daemon_status.yaml
   events_path: results/paper/operational_events/events.jsonl

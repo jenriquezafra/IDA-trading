@@ -1,0 +1,20 @@
+[Unit]
+Description=Trading Strats H1c paper daemon
+Wants=network-online.target
+After=network-online.target trading-strats-ibgateway.service
+Requires=trading-strats-ibgateway.service
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/trading-strats/app
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/trading-strats/app/.venv/bin/python -u -m src.execution.h1c_auto_daemon --config /opt/trading-strats/runtime/h1c_auto_daemon.yaml
+Restart=always
+RestartSec=60
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

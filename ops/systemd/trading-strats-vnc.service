@@ -1,0 +1,18 @@
+[Unit]
+Description=Trading Strats local-only VNC for IB Gateway
+Requires=trading-strats-ibgateway.service
+After=trading-strats-ibgateway.service
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+Environment=HOME=/home/trader
+Environment=DISPLAY=:99
+ExecStartPre=/usr/bin/test -f /opt/trading-strats/.vnc-pass
+ExecStart=/usr/bin/x11vnc -display :99 -localhost -rfbauth /opt/trading-strats/.vnc-pass -forever -shared -rfbport 5901
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

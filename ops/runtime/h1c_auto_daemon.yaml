@@ -1,5 +1,5 @@
 daemon:
-  auto_runner_config_path: configs/execution/h1c_auto_runner.yaml
+  auto_runner_config_path: /opt/trading-strats/runtime/h1c_auto_runner.paper.yaml
   open_scan_interval_seconds: 900
   pre_open_wakeup_minutes: 15
   pre_open_scan_interval_seconds: 900

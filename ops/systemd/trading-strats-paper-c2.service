@@ -1,0 +1,18 @@
+[Unit]
+Description=Trading Strats C2 paper daemon
+After=network-online.target trading-strats-ibgateway.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/trading-strats/app
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/trading-strats/app
+ExecStart=/opt/trading-strats/app/.venv/bin/python -u -m src.execution.setup_signal_auto_daemon --config /opt/trading-strats/runtime/c2_auto_daemon.yaml
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

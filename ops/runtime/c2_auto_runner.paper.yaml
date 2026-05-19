@@ -1,0 +1,40 @@
+auto:
+  candidate_id: C2
+  strategy_id: c2_h9_googl_5min_opening_bias_followthrough_v1
+  account: DU9782002
+  symbol: GOOGL
+  position_side: long
+  paper_only: true
+  require_market_open: true
+  execute_orders: true
+  transmit_orders: true
+  apply_state_after_submission: true
+  run_accounting_after_reconciliation: true
+  default_skip_cboe: true
+  default_skip_download: false
+  min_available_funds_usd: 1000
+  min_buying_power_usd: 1000
+  max_order_notional_usd: 10000
+  sizing_mode: buying_power_fraction
+  capital_fraction: 1.0
+  reserve_cash_usd: 0
+  min_quantity: 1
+  require_account_summary: true
+  enabled: true
+  kill_switch_path: /opt/trading-strats/runtime/kill_switches/c2_auto_paused
+  max_daily_entry_orders: 4
+  max_daily_realized_loss_usd: 1000
+  max_entry_slippage_bps: 7.5
+  max_exit_slippage_bps: 7.5
+
+components:
+  data_refresh_config_path: configs/execution/c2_paper_data_refresh.yaml
+  signal_runner_config_path: configs/execution/c2_setup_signal_runner.yaml
+  state_config_path: configs/execution/paper_state_c2.yaml
+  reconciliation_config_path: configs/execution/paper_reconcile_c2.yaml
+  accounting_config_path: configs/execution/paper_accounting_c2.yaml
+  order_plan_config_path: configs/execution/c2_order_plan.yaml
+  order_executor_config_path: configs/execution/c2_order_executor_auto_paper.yaml
+
+outputs:
+  output_dir: results/paper/c2_auto_runner
