@@ -1,0 +1,119 @@
+strategy_id: capitulation_gap_reversal_h5_v1
+hypothesis_id: H5
+description: >
+  Shares-first implementation of H5 Capitulation Gap Reversal. The signal looks
+  for liquid single-name capitulation sessions with severe downside, high
+  volume and a close-location recovery, then enters at the next regular-session
+  open with a stop under the event low.
+
+timeframe: 5min
+
+data:
+  provider: massive
+  # Starter liquid single-name universe. The runner skips missing local files and
+  # reports them in coverage, so this can be populated progressively from Massive.
+  symbols:
+    - AAPL
+    - MSFT
+    - NVDA
+    - AMZN
+    - META
+    - GOOGL
+    - GOOG
+    - TSLA
+    - AVGO
+    - AMD
+    - NFLX
+    - CRM
+    - ORCL
+    - INTC
+    - QCOM
+    - JPM
+    - BAC
+    - GS
+    - MS
+    - WFC
+    - XOM
+    - CVX
+    - COP
+    - UNH
+    - LLY
+    - JNJ
+    - PFE
+    - MRK
+    - WMT
+    - COST
+    - HD
+    - MCD
+    - NKE
+    - KO
+    - PEP
+    - DIS
+    - BA
+    - CAT
+    - GE
+    - UBER
+    - PLTR
+  cleaned_dir: data/cleaned
+  file_template: "{cleaned_dir}/{timeframe}/{symbol}/{symbol}_{timeframe}_clean.parquet"
+  timestamp_timezone: America/New_York
+
+signal:
+  gap_down_threshold: -0.20
+  daily_drop_threshold: -0.30
+  three_day_drop_threshold: -0.45
+  min_rel_volume: 10.0
+  rel_volume_window: 20
+  close_location_min: 0.60
+  min_price: 5.0
+  min_adv_dollar: 20000000.0
+  adv_window: 20
+  min_history_sessions: 20
+  require_next_open_above_event_low: true
+
+entry:
+  rule: next_regular_session_open
+
+exit:
+  rules:
+    - exit_id: target_2r_or_5d
+      profit_target_r: 2.0
+      max_hold_sessions: 5
+    - exit_id: fixed_3d
+      profit_target_r:
+      max_hold_sessions: 3
+    - exit_id: fixed_5d
+      profit_target_r:
+      max_hold_sessions: 5
+    - exit_id: target_4r_or_10d
+      profit_target_r: 4.0
+      max_hold_sessions: 10
+
+position:
+  type: single_name_shares
+  side: long_with_short_continuation_control
+  stop_reference: event_low
+  stop_buffer_bps: 0.0
+  max_initial_risk_pct: 0.25
+  max_positions_per_session: 5
+
+costs:
+  # Round-trip notional costs for shares. net_r converts these costs into
+  # stop-risk units using the trade's risk_pct.
+  round_trip_bps: [10.0, 25.0, 50.0, 100.0]
+
+controls:
+  all_capitulation_liquid: true
+  no_close_location: true
+  wait_1d: true
+  short_continuation: true
+
+split_policy:
+  train_months: 24
+  validation_months: 6
+  test_months: 6
+  step_months: 6
+  embargo_sessions: 1
+
+outputs:
+  output_dir: results/strategy/capitulation_gap_reversal/5min/h5_v1
