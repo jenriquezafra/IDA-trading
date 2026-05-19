@@ -5,7 +5,7 @@ reconciliation:
   state_config_path: configs/execution/paper_state_h1c.yaml
   ibkr_config_path: configs/execution/ibkr_paper_readonly.yaml
   position_tolerance: 0.000001
-  allow_unrelated_open_orders: false
+  allow_unrelated_open_orders: true
   request_all_open_orders: true
   include_executions: true
 

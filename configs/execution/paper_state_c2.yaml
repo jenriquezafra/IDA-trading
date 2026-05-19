@@ -1,0 +1,9 @@
+state:
+  strategy_id: c2_h9_googl_5min_opening_bias_followthrough_v1
+  account: DU9782002
+  symbol: GOOGL
+  position_side: long
+  state_path: results/paper/c2_state/state.yaml
+  event_log_path: results/paper/c2_state/events.parquet
+  output_dir: results/paper/c2_state/runs
+  allow_send_orders_tickets: false

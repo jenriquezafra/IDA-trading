@@ -1,0 +1,14 @@
+reconciliation:
+  strategy_id: c2_h9_googl_5min_opening_bias_followthrough_v1
+  account: DU9782002
+  symbol: GOOGL
+  position_side: long
+  state_config_path: configs/execution/paper_state_c2.yaml
+  ibkr_config_path: configs/execution/ibkr_paper_readonly_c2.yaml
+  position_tolerance: 0.000001
+  allow_unrelated_open_orders: true
+  request_all_open_orders: true
+  include_executions: true
+
+outputs:
+  output_dir: results/paper/c2_reconciliation

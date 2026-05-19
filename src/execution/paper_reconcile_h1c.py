@@ -79,6 +79,7 @@ class H1CReconciliationConfig:
     strategy_id: str
     account: str
     symbol: str
+    position_side: str
     state_config_path: Path
     ibkr_config_path: Path
     position_tolerance: float
@@ -95,6 +96,7 @@ class H1CReconciliationConfig:
             strategy_id=str(reconciliation.get("strategy_id", "")).strip(),
             account=str(reconciliation.get("account", "")).strip(),
             symbol=str(reconciliation.get("symbol", "QQQ")).strip().upper(),
+            position_side=str(reconciliation.get("position_side", "short")).strip().lower(),
             state_config_path=Path(reconciliation.get("state_config_path", "configs/execution/paper_state_h1c.yaml")),
             ibkr_config_path=Path(reconciliation.get("ibkr_config_path", "configs/execution/ibkr_paper_readonly.yaml")),
             position_tolerance=float(reconciliation.get("position_tolerance", 1e-6)),
@@ -113,6 +115,8 @@ class H1CReconciliationConfig:
             raise ValueError("reconciliation.account is required")
         if not self.symbol:
             raise ValueError("reconciliation.symbol is required")
+        if self.position_side not in {"long", "short"}:
+            raise ValueError("reconciliation.position_side must be long or short")
         if self.position_tolerance < 0.0:
             raise ValueError("position_tolerance must be non-negative")
 
@@ -202,6 +206,24 @@ def _target_open_trades(open_trades: pd.DataFrame, config: H1CReconciliationConf
         trades["symbol"].astype(str).str.upper().eq(config.symbol)
         & trades["sec_type"].astype(str).str.upper().eq("STK")
     ].copy()
+
+
+def _position_matches_side(position_qty: float, config: H1CReconciliationConfig) -> bool:
+    if config.position_side == "long":
+        return position_qty > config.position_tolerance
+    return position_qty < -config.position_tolerance
+
+
+def _side_position_abs_diff(position_qty: float, expected_quantity: float) -> float:
+    return abs(abs(position_qty) - abs(expected_quantity))
+
+
+def _entry_action(config: H1CReconciliationConfig) -> str:
+    return "BUY" if config.position_side == "long" else "SELL"
+
+
+def _exit_action(config: H1CReconciliationConfig) -> str:
+    return "SELL" if config.position_side == "long" else "BUY"
 
 
 def _execution_contract(fill: Any) -> dict[str, Any]:
@@ -313,6 +335,9 @@ def reconcile_state_snapshot(
     unrelated_order_count = int(len(unrelated_trades))
     status = str(state.get("status", "flat"))
     expected_quantity = float(state.get("quantity", 0.0) or 0.0)
+    side_label = config.position_side
+    entry_action = _entry_action(config)
+    exit_action = _exit_action(config)
 
     decision = "UNKNOWN_IBKR_STATE"
     severity = "error"
@@ -346,10 +371,10 @@ def reconcile_state_snapshot(
             severity = "ok"
             reason = "state has pending entry and IBKR has an active target order"
             state_transition_hint = "wait_for_fill"
-        elif target_position_qty < -config.position_tolerance:
+        elif _position_matches_side(target_position_qty, config):
             decision = "FILL_DETECTED_PENDING_ENTRY"
             severity = "action_required"
-            reason = "pending entry appears filled because IBKR has a short target position"
+            reason = f"pending entry appears filled because IBKR has a {side_label} target position"
             state_transition_hint = "mark_open_after_fill_accounting"
         else:
             decision = "PENDING_TICKET_WITHOUT_OPEN_ORDER"
@@ -357,8 +382,8 @@ def reconcile_state_snapshot(
             reason = "state has pending entry but IBKR has no active target order or target position"
             state_transition_hint = "manual_review_or_reset_pending_ticket"
     elif status == "open":
-        if target_position_qty < -config.position_tolerance:
-            if expected_quantity > 0.0 and abs(abs(target_position_qty) - expected_quantity) > config.position_tolerance:
+        if _position_matches_side(target_position_qty, config):
+            if expected_quantity > 0.0 and _side_position_abs_diff(target_position_qty, expected_quantity) > config.position_tolerance:
                 decision = "DRIFT_POSITION_MISMATCH"
                 severity = "block"
                 reason = "state is open but IBKR target quantity differs from state quantity"
@@ -366,29 +391,29 @@ def reconcile_state_snapshot(
             else:
                 decision = "OK_OPEN"
                 severity = "ok"
-                reason = "state is open and IBKR has the expected short target position"
+                reason = f"state is open and IBKR has the expected {side_label} target position"
                 state_transition_hint = "monitor_exit"
         else:
             decision = "DRIFT_POSITION_MISMATCH"
             severity = "block"
-            reason = "state is open but IBKR has no short target position"
+            reason = f"state is open but IBKR has no {side_label} target position"
             state_transition_hint = "manual_reconcile_position"
     elif status == "pending_exit":
-        buy_orders = target_trades[target_trades["action"].astype(str).str.upper().eq("BUY")]
-        if target_position_qty < -config.position_tolerance and not buy_orders.empty:
+        exit_orders = target_trades[target_trades["action"].astype(str).str.upper().eq(exit_action)]
+        if _position_matches_side(target_position_qty, config) and not exit_orders.empty:
             decision = "OK_PENDING_EXIT"
             severity = "ok"
-            reason = "state has pending exit and IBKR has active target buy order"
+            reason = f"state has pending exit and IBKR has active target {exit_action.lower()} order"
             state_transition_hint = "wait_for_exit_fill"
-        elif abs(target_position_qty) <= config.position_tolerance and buy_orders.empty:
+        elif abs(target_position_qty) <= config.position_tolerance and exit_orders.empty:
             decision = "FILL_DETECTED_PENDING_EXIT"
             severity = "action_required"
-            reason = "pending exit appears filled because IBKR has no target position or target buy order"
+            reason = f"pending exit appears filled because IBKR has no target position or target {exit_action.lower()} order"
             state_transition_hint = "mark_flat_after_exit_accounting"
-        elif target_position_qty < -config.position_tolerance and buy_orders.empty:
+        elif _position_matches_side(target_position_qty, config) and exit_orders.empty:
             decision = "PENDING_EXIT_WITHOUT_OPEN_ORDER"
             severity = "block"
-            reason = "state has pending exit but IBKR still has the short target position and no active buy order"
+            reason = f"state has pending exit but IBKR still has the {side_label} target position and no active {exit_action.lower()} order"
             state_transition_hint = "manual_review_or_resubmit_exit"
         else:
             decision = "UNKNOWN_IBKR_STATE"
@@ -404,6 +429,9 @@ def reconcile_state_snapshot(
         "state_status": status,
         "target_position_qty": target_position_qty,
         "target_open_orders": target_order_count,
+        "entry_action": entry_action,
+        "exit_action": exit_action,
+        "position_side": config.position_side,
         "account_nonzero_positions": int(len(account_positions)),
         "account_open_orders": int(len(account_trades)),
         "unrelated_open_orders": unrelated_order_count,

@@ -22,6 +22,7 @@ class H1CAccountingConfig:
     strategy_id: str
     account: str
     symbol: str
+    position_side: str
     state_config_path: Path
     pnl_log_path: Path
     allow_open_from_position_without_execution: bool
@@ -36,6 +37,7 @@ class H1CAccountingConfig:
             strategy_id=str(accounting.get("strategy_id", "")).strip(),
             account=str(accounting.get("account", "")).strip(),
             symbol=str(accounting.get("symbol", "QQQ")).strip().upper(),
+            position_side=str(accounting.get("position_side", "short")).strip().lower(),
             state_config_path=Path(accounting.get("state_config_path", "configs/execution/paper_state_h1c.yaml")),
             pnl_log_path=Path(accounting.get("pnl_log_path", "results/paper/h1c_state/pnl_events.parquet")),
             allow_open_from_position_without_execution=bool(accounting.get("allow_open_from_position_without_execution", True)),
@@ -52,6 +54,8 @@ class H1CAccountingConfig:
             raise ValueError("accounting.account is required")
         if not self.symbol:
             raise ValueError("accounting.symbol is required")
+        if self.position_side not in {"long", "short"}:
+            raise ValueError("accounting.position_side must be long or short")
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -111,13 +115,25 @@ def _target_executions(executions: pd.DataFrame, account: str, symbol: str) -> p
     ].copy()
 
 
-def _entry_fill_price(executions: pd.DataFrame, positions: pd.DataFrame, account: str, symbol: str) -> float | None:
+def _position_unit(side: str) -> float:
+    return 1.0 if side == "long" else -1.0
+
+
+def _entry_exec_sides(side: str) -> set[str]:
+    return {"BOT", "BUY"} if side == "long" else {"SLD", "SELL"}
+
+
+def _exit_exec_sides(side: str) -> set[str]:
+    return {"SLD", "SELL"} if side == "long" else {"BOT", "BUY"}
+
+
+def _entry_fill_price(executions: pd.DataFrame, positions: pd.DataFrame, account: str, symbol: str, side: str) -> float | None:
     target_execs = _target_executions(executions, account, symbol)
     if not target_execs.empty and "price" in target_execs.columns and "shares" in target_execs.columns:
-        sell_execs = target_execs[target_execs.get("side", "").astype(str).str.upper().isin(["SLD", "SELL"])]
-        if not sell_execs.empty:
-            shares = pd.to_numeric(sell_execs["shares"], errors="coerce").abs()
-            prices = pd.to_numeric(sell_execs["price"], errors="coerce")
+        entry_execs = target_execs[target_execs.get("side", "").astype(str).str.upper().isin(_entry_exec_sides(side))]
+        if not entry_execs.empty:
+            shares = pd.to_numeric(entry_execs["shares"], errors="coerce").abs()
+            prices = pd.to_numeric(entry_execs["price"], errors="coerce")
             denom = float(shares.sum())
             if denom > 0:
                 return float((prices * shares).sum() / denom)
@@ -130,27 +146,27 @@ def _entry_fill_price(executions: pd.DataFrame, positions: pd.DataFrame, account
     return None
 
 
-def _exit_fill_price(executions: pd.DataFrame, account: str, symbol: str) -> float | None:
+def _exit_fill_price(executions: pd.DataFrame, account: str, symbol: str, side: str) -> float | None:
     target_execs = _target_executions(executions, account, symbol)
     if target_execs.empty or "price" not in target_execs.columns or "shares" not in target_execs.columns:
         return None
-    buy_execs = target_execs[target_execs.get("side", "").astype(str).str.upper().isin(["BOT", "BUY"])]
-    if buy_execs.empty:
+    exit_execs = target_execs[target_execs.get("side", "").astype(str).str.upper().isin(_exit_exec_sides(side))]
+    if exit_execs.empty:
         return None
-    shares = pd.to_numeric(buy_execs["shares"], errors="coerce").abs()
-    prices = pd.to_numeric(buy_execs["price"], errors="coerce")
+    shares = pd.to_numeric(exit_execs["shares"], errors="coerce").abs()
+    prices = pd.to_numeric(exit_execs["price"], errors="coerce")
     denom = float(shares.sum())
     if denom <= 0:
         return None
     return float((prices * shares).sum() / denom)
 
 
-def _exit_realized_pnl(executions: pd.DataFrame, account: str, symbol: str) -> float | None:
+def _exit_realized_pnl(executions: pd.DataFrame, account: str, symbol: str, side: str) -> float | None:
     target_execs = _target_executions(executions, account, symbol)
     if target_execs.empty or "realized_pnl" not in target_execs.columns:
         return None
-    buy_execs = target_execs[target_execs.get("side", "").astype(str).str.upper().isin(["BOT", "BUY"])]
-    values = pd.to_numeric(buy_execs["realized_pnl"], errors="coerce").dropna()
+    exit_execs = target_execs[target_execs.get("side", "").astype(str).str.upper().isin(_exit_exec_sides(side))]
+    values = pd.to_numeric(exit_execs["realized_pnl"], errors="coerce").dropna()
     if values.empty:
         return None
     return float(values.sum())
@@ -208,7 +224,7 @@ def apply_accounting_to_state(
         target_qty = abs(float(reconciliation.get("target_position_qty", 0.0) or 0.0))
         if target_qty <= 0:
             raise ValueError("FILL_DETECTED_PENDING_ENTRY requires nonzero target_position_qty")
-        entry_price = _entry_fill_price(executions, positions, config.account, config.symbol)
+        entry_price = _entry_fill_price(executions, positions, config.account, config.symbol, config.position_side)
         pending = updated.get("pending_ticket") or {}
         theoretical_entry = pending.get("theoretical_entry_price")
         theoretical_entry_float = float(theoretical_entry) if theoretical_entry is not None else None
@@ -216,20 +232,26 @@ def apply_accounting_to_state(
         if entry_price is not None and theoretical_entry_float and theoretical_entry_float > 0:
             entry_slippage_bps = (entry_price / theoretical_entry_float - 1.0) * 10_000.0
         updated["status"] = "open"
-        updated["position_unit"] = -1.0
+        updated["position_side"] = config.position_side
+        updated["position_unit"] = _position_unit(config.position_side)
         updated["quantity"] = target_qty
-        updated["desired_position_unit"] = -1.0
+        updated["desired_position_unit"] = _position_unit(config.position_side)
         updated["pending_ticket"] = None
         updated["open_position"] = {
             "opened_at_utc": now,
             "quantity": target_qty,
-            "side": "SHORT",
+            "side": config.position_side.upper(),
             "signal_timestamp": pending.get("signal_timestamp"),
+            "session": pending.get("session"),
+            "bar_index": pending.get("bar_index"),
             "theoretical_entry_timestamp": pending.get("theoretical_entry_timestamp"),
             "theoretical_exit_timestamp": pending.get("theoretical_exit_timestamp"),
             "theoretical_exit_price": _optional_float(pending.get("theoretical_exit_price")),
             "exit_rule": pending.get("exit_rule"),
             "horizon_bars": pending.get("horizon_bars"),
+            "min_hold_bars": pending.get("min_hold_bars"),
+            "stop_loss_bps": pending.get("stop_loss_bps"),
+            "take_profit_bps": pending.get("take_profit_bps"),
             "entry_price": entry_price,
             "theoretical_entry_price": theoretical_entry_float,
             "entry_slippage_bps": entry_slippage_bps,
@@ -248,13 +270,16 @@ def apply_accounting_to_state(
         open_position = dict(updated.get("open_position") or {})
         pending = dict(updated.get("pending_ticket") or {})
         target_qty = abs(float(updated.get("quantity", 0.0) or open_position.get("quantity", 0.0) or reconciliation.get("expected_state_quantity", 0.0) or 0.0))
-        exit_price = _exit_fill_price(executions, config.account, config.symbol)
+        exit_price = _exit_fill_price(executions, config.account, config.symbol, config.position_side)
         entry_price = _optional_float(open_position.get("entry_price")) or _optional_float(open_position.get("theoretical_entry_price"))
         theoretical_exit = pending.get("theoretical_exit_price", open_position.get("theoretical_exit_price"))
         theoretical_exit_float = _optional_float(theoretical_exit)
-        realized_pnl = _exit_realized_pnl(executions, config.account, config.symbol)
+        realized_pnl = _exit_realized_pnl(executions, config.account, config.symbol, config.position_side)
         if realized_pnl is None and entry_price is not None and exit_price is not None and target_qty > 0:
-            realized_pnl = (entry_price - exit_price) * target_qty
+            if config.position_side == "long":
+                realized_pnl = (exit_price - entry_price) * target_qty
+            else:
+                realized_pnl = (entry_price - exit_price) * target_qty
         exit_slippage_bps = None
         if exit_price is not None and theoretical_exit_float and theoretical_exit_float > 0:
             exit_slippage_bps = (exit_price / theoretical_exit_float - 1.0) * 10_000.0

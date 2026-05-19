@@ -4,7 +4,7 @@ connection:
   trading_mode: paper
   host: 127.0.0.1
   port: 4002
-  client_id: 74
+  client_id: 84
   timeout_seconds: 10
   expected_account: "DU9782002"
 
@@ -19,9 +19,9 @@ safety:
   require_account_confirmation: false
   require_fingerprint_confirmation: false
   require_env_confirmation: false
-  env_confirmation_var: IBKR_H1C_EXECUTION_CONFIRM
+  env_confirmation_var: IBKR_C2_EXECUTION_CONFIRM
   max_orders: 1
-  max_total_notional_at_avg_cost: 1000000000
+  max_total_notional_at_avg_cost: 100000
   allowed_sec_types:
     - STK
   allowed_order_types:
@@ -30,4 +30,4 @@ safety:
     - DAY
 
 outputs:
-  output_dir: results/paper/h1c_order_execution
+  output_dir: results/paper/c2_order_execution

@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
-import math
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -12,25 +11,38 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from src.execution.h1c_auto_runner import (
+    _account_summary_from_reconciliation,
+    _paths_to_dict,
+    _read_yaml_if_exists,
+    attach_operational_metadata,
+    exit_due_status,
+    funds_check,
+    latest_slippage_metrics,
+    market_is_open,
+    size_ticket,
+    write_sized_ticket,
+)
 from src.execution.h1c_order_executor import run_h1c_order_execution
 from src.execution.h1c_order_plan import create_h1c_order_plan
-from src.execution.flatten_executor import is_nyse_rth
 from src.execution.paper_accounting_h1c import run_h1c_accounting
 from src.execution.paper_data_refresh import run_paper_data_refresh
-from src.execution.paper_h1c_signal_runner import run_h1c_signal_runner
 from src.execution.paper_reconcile_h1c import run_h1c_reconciliation
+from src.execution.paper_setup_signal_runner import latest_operational_price, run_setup_signal_runner
 from src.execution.paper_state_store import apply_ticket, utc_now
 
 
-DEFAULT_CONFIG_PATH = Path("configs/execution/h1c_auto_runner.yaml")
-DEFAULT_OUTPUT_DIR = Path("results/paper/h1c_auto_runner")
+DEFAULT_CONFIG_PATH = Path("configs/execution/c2_auto_runner.yaml")
+DEFAULT_OUTPUT_DIR = Path("results/paper/c2_auto_runner")
 
 
 @dataclass(frozen=True)
-class H1CAutoConfig:
+class SetupSignalAutoConfig:
+    candidate_id: str
     strategy_id: str
     account: str
     symbol: str
+    position_side: str
     paper_only: bool
     require_market_open: bool
     execute_orders: bool
@@ -63,14 +75,16 @@ class H1CAutoConfig:
     output_dir: Path
 
     @classmethod
-    def from_mapping(cls, raw: dict[str, Any]) -> "H1CAutoConfig":
-        auto = dict(raw.get("auto", {}))
-        components = dict(raw.get("components", {}))
-        outputs = dict(raw.get("outputs", {}))
+    def from_mapping(cls, raw: dict[str, Any]) -> "SetupSignalAutoConfig":
+        auto = dict(raw.get("auto", {}) or {})
+        components = dict(raw.get("components", {}) or {})
+        outputs = dict(raw.get("outputs", {}) or {})
         config = cls(
+            candidate_id=str(auto.get("candidate_id", "")).strip(),
             strategy_id=str(auto.get("strategy_id", "")).strip(),
             account=str(auto.get("account", "")).strip(),
-            symbol=str(auto.get("symbol", "QQQ")).strip().upper(),
+            symbol=str(auto.get("symbol", "GOOGL")).strip().upper(),
+            position_side=str(auto.get("position_side", "long")).strip().lower(),
             paper_only=bool(auto.get("paper_only", True)),
             require_market_open=bool(auto.get("require_market_open", True)),
             execute_orders=bool(auto.get("execute_orders", True)),
@@ -81,41 +95,43 @@ class H1CAutoConfig:
             default_skip_download=bool(auto.get("default_skip_download", False)),
             min_available_funds_usd=float(auto.get("min_available_funds_usd", 1000.0)),
             min_buying_power_usd=float(auto.get("min_buying_power_usd", 1000.0)),
-            max_order_notional_usd=None if auto.get("max_order_notional_usd") in {None, ""} else float(auto.get("max_order_notional_usd", 1000.0)),
-            sizing_mode=str(auto.get("sizing_mode", "ticket_quantity")).strip(),
+            max_order_notional_usd=None if auto.get("max_order_notional_usd") in {None, ""} else float(auto.get("max_order_notional_usd", 10000.0)),
+            sizing_mode=str(auto.get("sizing_mode", "buying_power_fraction")).strip(),
             capital_fraction=float(auto.get("capital_fraction", 1.0)),
             reserve_cash_usd=float(auto.get("reserve_cash_usd", 0.0)),
             min_quantity=float(auto.get("min_quantity", 1.0)),
             require_account_summary=bool(auto.get("require_account_summary", True)),
             enabled=bool(auto.get("enabled", True)),
-            kill_switch_path=Path(auto.get("kill_switch_path", "ops/kill_switches/h1c_auto_paused")),
+            kill_switch_path=Path(auto.get("kill_switch_path", "ops/kill_switches/c2_auto_paused")),
             max_daily_entry_orders=None if auto.get("max_daily_entry_orders") in {None, ""} else int(auto.get("max_daily_entry_orders", 4)),
-            max_daily_realized_loss_usd=None
-            if auto.get("max_daily_realized_loss_usd") in {None, ""}
-            else float(auto.get("max_daily_realized_loss_usd", 1000.0)),
+            max_daily_realized_loss_usd=None if auto.get("max_daily_realized_loss_usd") in {None, ""} else float(auto.get("max_daily_realized_loss_usd", 1000.0)),
             max_entry_slippage_bps=None if auto.get("max_entry_slippage_bps") in {None, ""} else float(auto.get("max_entry_slippage_bps", 25.0)),
             max_exit_slippage_bps=None if auto.get("max_exit_slippage_bps") in {None, ""} else float(auto.get("max_exit_slippage_bps", 25.0)),
-            data_refresh_config_path=Path(components.get("data_refresh_config_path", "configs/execution/paper_data_refresh.yaml")),
-            signal_runner_config_path=Path(components.get("signal_runner_config_path", "configs/execution/paper_runner_h1c_signal_only.yaml")),
-            state_config_path=Path(components.get("state_config_path", "configs/execution/paper_state_h1c.yaml")),
-            reconciliation_config_path=Path(components.get("reconciliation_config_path", "configs/execution/paper_reconcile_h1c.yaml")),
-            accounting_config_path=Path(components.get("accounting_config_path", "configs/execution/paper_accounting_h1c.yaml")),
-            order_plan_config_path=Path(components.get("order_plan_config_path", "configs/execution/h1c_order_plan.yaml")),
-            order_executor_config_path=Path(components.get("order_executor_config_path", "configs/execution/h1c_order_executor_auto_paper.yaml")),
+            data_refresh_config_path=Path(components.get("data_refresh_config_path", "configs/execution/c2_paper_data_refresh.yaml")),
+            signal_runner_config_path=Path(components.get("signal_runner_config_path", "configs/execution/c2_setup_signal_runner.yaml")),
+            state_config_path=Path(components.get("state_config_path", "configs/execution/paper_state_c2.yaml")),
+            reconciliation_config_path=Path(components.get("reconciliation_config_path", "configs/execution/paper_reconcile_c2.yaml")),
+            accounting_config_path=Path(components.get("accounting_config_path", "configs/execution/paper_accounting_c2.yaml")),
+            order_plan_config_path=Path(components.get("order_plan_config_path", "configs/execution/c2_order_plan.yaml")),
+            order_executor_config_path=Path(components.get("order_executor_config_path", "configs/execution/c2_order_executor_auto_paper.yaml")),
             output_dir=Path(outputs.get("output_dir", DEFAULT_OUTPUT_DIR)),
         )
         config.validate()
         return config
 
     def validate(self) -> None:
+        if not self.candidate_id:
+            raise ValueError("auto.candidate_id is required")
         if not self.strategy_id:
             raise ValueError("auto.strategy_id is required")
         if not self.account:
             raise ValueError("auto.account is required")
         if not self.symbol:
             raise ValueError("auto.symbol is required")
+        if self.position_side != "long":
+            raise ValueError("setup-signal auto runner currently supports long paper candidates")
         if not self.paper_only:
-            raise ValueError("H1c auto runner is paper-only")
+            raise ValueError("setup-signal auto runner is paper-only")
         if self.max_order_notional_usd is not None and self.max_order_notional_usd <= 0:
             raise ValueError("max_order_notional_usd must be positive")
         if self.sizing_mode not in {"ticket_quantity", "buying_power_fraction", "available_funds_fraction"}:
@@ -126,16 +142,6 @@ class H1CAutoConfig:
             raise ValueError("reserve_cash_usd must be non-negative")
         if self.min_quantity <= 0:
             raise ValueError("min_quantity must be positive")
-        if self.min_available_funds_usd < 0 or self.min_buying_power_usd < 0:
-            raise ValueError("cash/buying-power thresholds must be non-negative")
-        if self.max_daily_entry_orders is not None and self.max_daily_entry_orders <= 0:
-            raise ValueError("max_daily_entry_orders must be positive when set")
-        if self.max_daily_realized_loss_usd is not None and self.max_daily_realized_loss_usd <= 0:
-            raise ValueError("max_daily_realized_loss_usd must be positive when set")
-        if self.max_entry_slippage_bps is not None and self.max_entry_slippage_bps <= 0:
-            raise ValueError("max_entry_slippage_bps must be positive when set")
-        if self.max_exit_slippage_bps is not None and self.max_exit_slippage_bps <= 0:
-            raise ValueError("max_exit_slippage_bps must be positive when set")
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -155,237 +161,36 @@ class H1CAutoConfig:
 
 
 @dataclass(frozen=True)
-class H1CAutoPaths:
+class SetupSignalAutoPaths:
     output_dir: Path
     manifest_path: Path
     report_path: Path
 
 
-def load_auto_config(path: str | Path = DEFAULT_CONFIG_PATH) -> H1CAutoConfig:
+def load_auto_config(path: str | Path = DEFAULT_CONFIG_PATH) -> SetupSignalAutoConfig:
     config_path = Path(path)
     with config_path.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"expected YAML mapping: {config_path}")
-    return H1CAutoConfig.from_mapping(raw)
+    return SetupSignalAutoConfig.from_mapping(raw)
 
 
-def _paths_to_dict(paths: Any | None) -> dict[str, str]:
-    if paths is None:
-        return {}
-    return {key: str(value) for key, value in asdict(paths).items()}
+def entry_action(config: SetupSignalAutoConfig) -> str:
+    return "BUY" if config.position_side == "long" else "SELL"
 
 
-def _safe_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    text = str(value).replace(",", "").strip()
-    if not text:
-        return None
-    try:
-        number = float(text)
-    except ValueError:
-        return None
-    return number if math.isfinite(number) else None
+def exit_action(config: SetupSignalAutoConfig) -> str:
+    return "SELL" if config.position_side == "long" else "BUY"
 
 
-def _account_summary_from_reconciliation(reconciliation_manifest: dict[str, Any]) -> pd.DataFrame:
-    snapshot_dir = reconciliation_manifest.get("outputs", {}).get("ibkr_snapshot_dir")
-    if not snapshot_dir:
-        return pd.DataFrame()
-    path = Path(snapshot_dir) / "account_summary.parquet"
-    return pd.read_parquet(path) if path.exists() else pd.DataFrame()
+def accounting_pnl_log_path(config: SetupSignalAutoConfig) -> Path:
+    raw = _read_yaml_if_exists(config.accounting_config_path)
+    accounting = dict(raw.get("accounting", {}) or {})
+    return Path(accounting.get("pnl_log_path", "results/paper/c2_state/pnl_events.parquet"))
 
 
-def account_value(account_summary: pd.DataFrame, account: str, tag: str, currency: str = "USD") -> float | None:
-    if account_summary.empty:
-        return None
-    frame = account_summary.copy()
-    mask = frame.get("account", pd.Series("", index=frame.index)).astype(str).eq(account)
-    mask &= frame.get("tag", pd.Series("", index=frame.index)).astype(str).eq(tag)
-    rows = frame[mask]
-    if rows.empty:
-        return None
-    if "currency" in frame.columns:
-        requested = rows[rows["currency"].astype(str).isin([currency, ""])].copy()
-        if not requested.empty:
-            rows = requested
-    return _safe_float(rows.iloc[0].get("value"))
-
-
-def market_is_open(reconciliation_manifest: dict[str, Any]) -> tuple[bool, str]:
-    server_time = reconciliation_manifest.get("ibkr", {}).get("health", {}).get("server_time", "")
-    if not server_time:
-        return False, "missing_ibkr_server_time"
-    return bool(is_nyse_rth(pd.Timestamp(server_time).to_pydatetime())), str(server_time)
-
-
-def size_ticket(ticket: dict[str, Any], account_summary: pd.DataFrame, config: H1CAutoConfig) -> tuple[dict[str, Any], dict[str, Any]]:
-    sized = dict(ticket)
-    original_quantity = float(ticket.get("quantity", 0.0) or 0.0)
-    price = _safe_float(ticket.get("theoretical_entry_price"))
-    available = account_value(account_summary, config.account, "AvailableFunds")
-    buying_power = account_value(account_summary, config.account, "BuyingPower")
-    reference_capital = None
-    if config.sizing_mode == "buying_power_fraction":
-        reference_capital = buying_power
-    elif config.sizing_mode == "available_funds_fraction":
-        reference_capital = available
-    if str(ticket.get("action", "NONE")).upper() in {"SELL", "BUY"} and price and reference_capital is not None:
-        usable_capital = max(0.0, reference_capital * config.capital_fraction - config.reserve_cash_usd)
-        if config.max_order_notional_usd is not None:
-            usable_capital = min(usable_capital, config.max_order_notional_usd)
-        quantity = math.floor(usable_capital / price)
-        if quantity >= config.min_quantity:
-            sized["quantity"] = float(quantity)
-        else:
-            sized["quantity"] = 0.0
-            sized["action"] = "NONE"
-            sized["status"] = "sizing_blocked"
-            sized["reason"] = "sized quantity is below min_quantity"
-    return sized, {
-        "sizing_mode": config.sizing_mode,
-        "original_quantity": original_quantity,
-        "sized_quantity": float(sized.get("quantity", 0.0) or 0.0),
-        "reference_capital": reference_capital,
-        "capital_fraction": config.capital_fraction,
-        "reserve_cash_usd": config.reserve_cash_usd,
-        "theoretical_entry_price": price,
-        "available_funds": available,
-        "buying_power": buying_power,
-    }
-
-
-def write_sized_ticket(ticket: dict[str, Any], output_dir: str | Path) -> Path:
-    path = Path(output_dir) / "paper_ticket_sized.yaml"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(ticket, sort_keys=False), encoding="utf-8")
-    return path
-
-
-def ticket_reference_price(ticket: dict[str, Any]) -> float | None:
-    action = str(ticket.get("action", "NONE")).upper()
-    if action == "BUY":
-        return _safe_float(ticket.get("theoretical_exit_price")) or _safe_float(ticket.get("theoretical_entry_price"))
-    return _safe_float(ticket.get("theoretical_entry_price")) or _safe_float(ticket.get("theoretical_exit_price"))
-
-
-def funds_check(ticket: dict[str, Any], account_summary: pd.DataFrame, config: H1CAutoConfig) -> dict[str, Any]:
-    quantity = float(ticket.get("quantity", 0.0) or 0.0)
-    price = ticket_reference_price(ticket)
-    notional = quantity * (price or 0.0)
-    available = account_value(account_summary, config.account, "AvailableFunds")
-    buying_power = account_value(account_summary, config.account, "BuyingPower")
-    errors: list[str] = []
-    if config.require_account_summary and account_summary.empty:
-        errors.append("account summary is missing")
-    if quantity > 0 and price is None:
-        errors.append("ticket reference price is missing")
-    if config.max_order_notional_usd is not None and notional > config.max_order_notional_usd:
-        errors.append(f"order notional {notional:.2f} exceeds max_order_notional_usd {config.max_order_notional_usd:.2f}")
-    if available is None:
-        if config.require_account_summary:
-            errors.append("AvailableFunds is missing")
-    elif available < config.min_available_funds_usd:
-        errors.append(f"AvailableFunds {available:.2f} below minimum {config.min_available_funds_usd:.2f}")
-    if buying_power is None:
-        if config.require_account_summary:
-            errors.append("BuyingPower is missing")
-    elif buying_power < config.min_buying_power_usd:
-        errors.append(f"BuyingPower {buying_power:.2f} below minimum {config.min_buying_power_usd:.2f}")
-    return {
-        "ok": not errors,
-        "errors": errors,
-        "available_funds": available,
-        "buying_power": buying_power,
-        "ticket_quantity": quantity,
-        "ticket_price": price,
-        "order_notional": notional,
-    }
-
-
-def load_state_snapshot(path: str | Path) -> dict[str, Any]:
-    with Path(path).open("r", encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle) or {}
-    if not isinstance(raw, dict):
-        raise ValueError(f"expected YAML mapping: {path}")
-    return raw
-
-
-def exit_due_status(state: dict[str, Any], server_time: str) -> dict[str, Any]:
-    open_position = dict(state.get("open_position") or {})
-    exit_timestamp = open_position.get("theoretical_exit_timestamp")
-    if state.get("status") != "open":
-        return {"due": False, "reason": "state_not_open", "exit_timestamp": exit_timestamp, "server_time": server_time}
-    if not exit_timestamp:
-        return {"due": False, "reason": "missing_theoretical_exit_timestamp", "exit_timestamp": exit_timestamp, "server_time": server_time}
-    try:
-        server_ts = pd.Timestamp(server_time)
-        exit_ts = pd.Timestamp(exit_timestamp)
-    except Exception as exc:  # noqa: BLE001
-        return {"due": False, "reason": f"invalid_timestamp: {exc}", "exit_timestamp": exit_timestamp, "server_time": server_time}
-    if server_ts.tzinfo is not None and exit_ts.tzinfo is None:
-        exit_ts = exit_ts.tz_localize(server_ts.tzinfo)
-    elif server_ts.tzinfo is None and exit_ts.tzinfo is not None:
-        server_ts = server_ts.tz_localize(exit_ts.tzinfo)
-    return {
-        "due": bool(server_ts >= exit_ts),
-        "reason": "exit_due" if server_ts >= exit_ts else "exit_not_due",
-        "exit_timestamp": str(exit_ts),
-        "server_time": str(server_ts),
-    }
-
-
-def build_exit_ticket(state: dict[str, Any], config: H1CAutoConfig) -> dict[str, Any]:
-    open_position = dict(state.get("open_position") or {})
-    quantity = abs(float(state.get("quantity", 0.0) or open_position.get("quantity", 0.0) or 0.0))
-    return {
-        "mode": "signal_only",
-        "send_orders": False,
-        "strategy_id": config.strategy_id,
-        "account": config.account,
-        "symbol": config.symbol,
-        "signal_timestamp": open_position.get("signal_timestamp") or state.get("last_signal_timestamp"),
-        "session": "",
-        "bar_index": None,
-        "entry_rule": "next_open",
-        "exit_rule": open_position.get("exit_rule") or "fixed_horizon_open",
-        "horizon_bars": open_position.get("horizon_bars"),
-        "execution_timing": "fixed_horizon_exit",
-        "theoretical_entry_timestamp": open_position.get("theoretical_entry_timestamp"),
-        "theoretical_entry_price": open_position.get("theoretical_entry_price"),
-        "theoretical_exit_timestamp": open_position.get("theoretical_exit_timestamp"),
-        "theoretical_exit_price": open_position.get("theoretical_exit_price"),
-        "desired_position_unit": 0.0,
-        "action": "BUY",
-        "quantity": quantity,
-        "order_type": "MKT",
-        "time_in_force": "DAY",
-        "status": "paper_ticket_only",
-        "reason": "H1c fixed-horizon short exit is due",
-    }
-
-
-def _utc_date(value: Any) -> str:
-    ts = pd.Timestamp(value)
-    if ts.tzinfo is None:
-        ts = ts.tz_localize("UTC")
-    else:
-        ts = ts.tz_convert("UTC")
-    return ts.date().isoformat()
-
-
-def _read_yaml_if_exists(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return {}
-    return raw if isinstance(raw, dict) else {}
-
-
-def daily_entry_order_count(output_dir: str | Path, date_utc: str) -> int:
+def daily_entry_order_count(output_dir: str | Path, date_utc: str, action: str) -> int:
     root = Path(output_dir)
     if not root.exists():
         return 0
@@ -396,13 +201,17 @@ def daily_entry_order_count(output_dir: str | Path, date_utc: str) -> int:
         if not created:
             continue
         try:
-            if _utc_date(created) != date_utc:
+            ts = pd.Timestamp(created)
+            if ts.tzinfo is None:
+                ts = ts.tz_localize("UTC")
+            else:
+                ts = ts.tz_convert("UTC")
+            if ts.date().isoformat() != date_utc:
                 continue
         except Exception:
             continue
         ticket = ((manifest.get("signal") or {}).get("ticket") or {})
-        action = str(ticket.get("action") or "").upper()
-        if action != "SELL":
+        if str(ticket.get("action") or "").upper() != action:
             continue
         try:
             total += int(((manifest.get("execution") or {}).get("summary") or {}).get("submitted_orders") or 0)
@@ -411,50 +220,19 @@ def daily_entry_order_count(output_dir: str | Path, date_utc: str) -> int:
     return total
 
 
-def accounting_pnl_log_path(config: H1CAutoConfig) -> Path:
-    raw = _read_yaml_if_exists(config.accounting_config_path)
-    accounting = dict(raw.get("accounting", {}) or {})
-    return Path(accounting.get("pnl_log_path", "results/paper/h1c_state/pnl_events.parquet"))
-
-
-def daily_realized_pnl(pnl_log_path: str | Path, date_utc: str) -> float:
-    path = Path(pnl_log_path)
-    if not path.exists():
-        return 0.0
-    try:
-        frame = pd.read_parquet(path)
-    except Exception:
-        return 0.0
-    if frame.empty or "created_at_utc" not in frame.columns or "realized_pnl" not in frame.columns:
-        return 0.0
-    created_dates = pd.to_datetime(frame["created_at_utc"], errors="coerce", utc=True).dt.date.astype(str)
-    values = pd.to_numeric(frame.loc[created_dates.eq(date_utc), "realized_pnl"], errors="coerce").fillna(0.0)
-    return float(values.sum())
-
-
-def latest_slippage_metrics(pnl_log_path: str | Path) -> dict[str, float | None]:
-    path = Path(pnl_log_path)
-    if not path.exists():
-        return {"entry_slippage_bps": None, "exit_slippage_bps": None}
-    try:
-        frame = pd.read_parquet(path)
-    except Exception:
-        return {"entry_slippage_bps": None, "exit_slippage_bps": None}
-    metrics: dict[str, float | None] = {}
-    for column in ["entry_slippage_bps", "exit_slippage_bps"]:
-        if column not in frame.columns:
-            metrics[column] = None
-            continue
-        values = pd.to_numeric(frame[column], errors="coerce").dropna()
-        metrics[column] = None if values.empty else float(values.iloc[-1])
-    return metrics
-
-
-def entry_safety_check(config: H1CAutoConfig, *, output_dir: str | Path, created_at_utc: str) -> dict[str, Any]:
-    date_utc = _utc_date(created_at_utc)
-    entry_orders_today = daily_entry_order_count(output_dir, date_utc)
+def setup_entry_safety_check(config: SetupSignalAutoConfig, *, output_dir: str | Path, created_at_utc: str) -> dict[str, Any]:
+    date_utc = pd.Timestamp(created_at_utc).tz_convert("UTC").date().isoformat()
+    entry_orders_today = daily_entry_order_count(output_dir, date_utc, entry_action(config))
     pnl_path = accounting_pnl_log_path(config)
-    realized_pnl_today = daily_realized_pnl(pnl_path, date_utc)
+    realized_pnl_today = 0.0
+    if pnl_path.exists():
+        try:
+            frame = pd.read_parquet(pnl_path)
+            if "created_at_utc" in frame.columns and "realized_pnl" in frame.columns:
+                created_dates = pd.to_datetime(frame["created_at_utc"], errors="coerce", utc=True).dt.date.astype(str)
+                realized_pnl_today = float(pd.to_numeric(frame.loc[created_dates.eq(date_utc), "realized_pnl"], errors="coerce").fillna(0.0).sum())
+        except Exception:
+            realized_pnl_today = 0.0
     slippage = latest_slippage_metrics(pnl_path)
     issues: list[str] = []
     kill_switch_exists = config.kill_switch_path.exists()
@@ -491,41 +269,92 @@ def entry_safety_check(config: H1CAutoConfig, *, output_dir: str | Path, created
     }
 
 
-def reconciliation_drift_snapshot(reconciliation: dict[str, Any]) -> dict[str, Any]:
-    target_qty = float(reconciliation.get("target_position_qty", 0.0) or 0.0)
-    expected_qty = float(reconciliation.get("expected_state_quantity", 0.0) or 0.0)
-    signed_expected = -abs(expected_qty) if expected_qty else 0.0
+def take_profit_status(
+    state: dict[str, Any],
+    *,
+    latest_price: dict[str, Any],
+) -> dict[str, Any]:
+    open_position = dict(state.get("open_position") or {})
+    take_profit_bps = float(open_position.get("take_profit_bps") or 0.0)
+    stop_loss_bps = float(open_position.get("stop_loss_bps") or 0.0)
+    min_hold_bars = int(open_position.get("min_hold_bars") or 1)
+    if state.get("status") != "open":
+        return {"due": False, "reason": "state_not_open"}
+    entry_price = open_position.get("entry_price") or open_position.get("theoretical_entry_price")
+    current_price = latest_price.get("price")
+    if not entry_price or not current_price:
+        return {"due": False, "reason": "missing_price", "latest_price": latest_price}
+    entry_session = str(open_position.get("session") or "")
+    latest_session = str(latest_price.get("session") or "")
+    entry_bar = open_position.get("bar_index")
+    latest_bar = latest_price.get("bar_index")
+    bars_held = None
+    if entry_session and latest_session == entry_session and entry_bar is not None and latest_bar is not None:
+        bars_held = max(0, int(latest_bar) - int(entry_bar))
+    elif entry_session and latest_session and latest_session != entry_session:
+        return {"due": True, "reason": "session_changed_force_exit", "latest_price": latest_price, "bars_held": bars_held}
+    if bars_held is not None and bars_held < min_hold_bars:
+        return {"due": False, "reason": "min_hold_not_reached", "latest_price": latest_price, "bars_held": bars_held}
+    move_bps = (float(current_price) / float(entry_price) - 1.0) * 10_000.0
+    due = False
+    reason = "no_price_exit"
+    if take_profit_bps > 0 and move_bps >= take_profit_bps:
+        due = True
+        reason = "take_profit_due"
+    elif stop_loss_bps > 0 and move_bps <= -stop_loss_bps:
+        due = True
+        reason = "stop_loss_due"
     return {
-        "decision": reconciliation.get("decision"),
-        "severity": reconciliation.get("severity"),
-        "target_position_qty": target_qty,
-        "expected_state_quantity": expected_qty,
-        "signed_expected_position_qty": signed_expected,
-        "position_qty_drift": target_qty - signed_expected,
-        "target_open_orders": reconciliation.get("target_open_orders"),
-        "account_open_orders": reconciliation.get("account_open_orders"),
-        "unrelated_open_orders": reconciliation.get("unrelated_open_orders"),
-        "state_transition_hint": reconciliation.get("state_transition_hint"),
+        "due": due,
+        "reason": reason,
+        "latest_price": latest_price,
+        "entry_price": float(entry_price),
+        "move_bps": move_bps,
+        "take_profit_bps": take_profit_bps,
+        "stop_loss_bps": stop_loss_bps,
+        "bars_held": bars_held,
     }
 
 
-def attach_operational_metadata(manifest: dict[str, Any], *, started_monotonic: float, step_timings: dict[str, float]) -> None:
-    manifest["latency"] = {
-        "total_seconds": round(time.perf_counter() - started_monotonic, 3),
-        "steps": {key: round(value, 3) for key, value in step_timings.items()},
+def build_exit_ticket(state: dict[str, Any], config: SetupSignalAutoConfig, *, reason: str, latest_price: dict[str, Any] | None = None) -> dict[str, Any]:
+    open_position = dict(state.get("open_position") or {})
+    quantity = abs(float(state.get("quantity", 0.0) or open_position.get("quantity", 0.0) or 0.0))
+    price = (latest_price or {}).get("price")
+    timestamp = (latest_price or {}).get("next_open_timestamp")
+    return {
+        "mode": "signal_only",
+        "send_orders": False,
+        "strategy_id": config.strategy_id,
+        "candidate_id": config.candidate_id,
+        "account": config.account,
+        "symbol": config.symbol,
+        "signal_timestamp": open_position.get("signal_timestamp") or state.get("last_signal_timestamp"),
+        "session": open_position.get("session") or "",
+        "bar_index": open_position.get("bar_index"),
+        "entry_rule": "setup_signal_lifecycle",
+        "exit_rule": open_position.get("exit_rule") or "setup_signal_lifecycle",
+        "horizon_bars": open_position.get("horizon_bars"),
+        "min_hold_bars": open_position.get("min_hold_bars"),
+        "stop_loss_bps": open_position.get("stop_loss_bps"),
+        "take_profit_bps": open_position.get("take_profit_bps"),
+        "execution_timing": reason,
+        "theoretical_entry_timestamp": open_position.get("theoretical_entry_timestamp"),
+        "theoretical_entry_price": open_position.get("theoretical_entry_price"),
+        "theoretical_exit_timestamp": timestamp or open_position.get("theoretical_exit_timestamp"),
+        "theoretical_exit_price": price or open_position.get("theoretical_exit_price"),
+        "desired_position_unit": 0.0,
+        "action": exit_action(config),
+        "quantity": quantity,
+        "order_type": "MKT",
+        "time_in_force": "DAY",
+        "status": "paper_ticket_only",
+        "reason": reason,
     }
-    drift: dict[str, Any] = {}
-    if manifest.get("pre_trade_reconciliation"):
-        drift["pre_trade"] = reconciliation_drift_snapshot(dict(manifest.get("pre_trade_reconciliation") or {}))
-    if manifest.get("post_execution_reconciliation"):
-        drift["post_execution"] = reconciliation_drift_snapshot(dict(manifest.get("post_execution_reconciliation") or {}))
-    if drift:
-        manifest["drift"] = drift
 
 
 def _write_report(path: Path, manifest: dict[str, Any]) -> None:
     lines = [
-        "# H1c auto runner",
+        f"# {manifest['config'].get('candidate_id', 'setup-signal')} auto runner",
         "",
         f"- Created UTC: `{manifest['run']['created_at_utc']}`",
         f"- Decision: `{manifest['decision']}`",
@@ -544,13 +373,13 @@ def _write_report(path: Path, manifest: dict[str, Any]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run_h1c_auto(
+def run_setup_signal_auto(
     *,
     config_path: str | Path = DEFAULT_CONFIG_PATH,
     skip_download: bool | None = None,
     skip_cboe: bool | None = None,
     output_dir: str | Path | None = None,
-) -> tuple[H1CAutoPaths, dict[str, Any]]:
+) -> tuple[SetupSignalAutoPaths, dict[str, Any]]:
     config = load_auto_config(config_path)
     created = utc_now()
     started_monotonic = time.perf_counter()
@@ -560,12 +389,12 @@ def run_h1c_auto(
     lock_handle = (base_output_dir / "auto.lock").open("w", encoding="utf-8")
     root = base_output_dir / created.replace(":", "").replace("-", "")
     root.mkdir(parents=True, exist_ok=True)
-    paths = H1CAutoPaths(output_dir=root, manifest_path=root / "manifest.yaml", report_path=root / "report.md")
+    paths = SetupSignalAutoPaths(output_dir=root, manifest_path=root / "manifest.yaml", report_path=root / "report.md")
 
     def finish_step(name: str, started: float) -> None:
         step_timings[name] = time.perf_counter() - started
 
-    def write_manifest_and_report(manifest: dict[str, Any]) -> tuple[H1CAutoPaths, dict[str, Any]]:
+    def write_manifest_and_report(manifest: dict[str, Any]) -> tuple[SetupSignalAutoPaths, dict[str, Any]]:
         attach_operational_metadata(manifest, started_monotonic=started_monotonic, step_timings=step_timings)
         paths.manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
         _write_report(paths.report_path, manifest)
@@ -576,10 +405,10 @@ def run_h1c_auto(
     except BlockingIOError:
         manifest = {
             "schema_version": 1,
-            "run": {"run_type": "h1c_auto_runner", "created_at_utc": created, "status": "skipped"},
+            "run": {"run_type": "setup_signal_auto_runner", "candidate_id": config.candidate_id, "created_at_utc": created, "status": "skipped"},
             "config": config.to_dict(),
             "decision": "lock_held",
-            "reason": "another H1c auto runner instance is already active",
+            "reason": "another setup-signal auto runner instance is already active",
         }
         lock_handle.close()
         return write_manifest_and_report(manifest)
@@ -594,7 +423,7 @@ def run_h1c_auto(
         is_open, server_time = market_is_open(pre_recon_manifest)
         manifest: dict[str, Any] = {
             "schema_version": 1,
-            "run": {"run_type": "h1c_auto_runner", "created_at_utc": created, "status": "complete"},
+            "run": {"run_type": "setup_signal_auto_runner", "candidate_id": config.candidate_id, "created_at_utc": created, "status": "complete"},
             "config": config.to_dict(),
             "market": {"open": is_open, "server_time": server_time},
             "pre_trade_reconciliation": pre_recon_manifest["reconciliation"],
@@ -624,23 +453,39 @@ def run_h1c_auto(
                     }
                 )
             else:
-                manifest.update(
-                    {
-                        "decision": "accounting_required",
-                        "reason": f"pre-trade reconciliation detected fill but accounting is disabled: {reconciliation_decision}",
-                    }
-                )
+                manifest.update({"decision": "accounting_required", "reason": f"pre-trade reconciliation detected fill but accounting is disabled: {reconciliation_decision}"})
             return write_manifest_and_report(manifest)
 
         if reconciliation_decision == "OK_OPEN":
-            state = load_state_snapshot(pre_recon_paths.state_snapshot_path)
-            exit_status = exit_due_status(state, server_time)
-            manifest["exit_monitor"] = exit_status
-            if not exit_status["due"]:
-                manifest.update({"decision": "monitoring_open_position", "reason": exit_status["reason"]})
+            state = yaml.safe_load(pre_recon_paths.state_snapshot_path.read_text(encoding="utf-8")) or {}
+            fixed_exit = exit_due_status(state, server_time)
+            manifest["exit_monitor"] = fixed_exit
+            latest_price: dict[str, Any] | None = None
+            price_exit: dict[str, Any] = {"due": False, "reason": "fixed_exit_not_due"}
+            if not fixed_exit["due"]:
+                step_started = time.perf_counter()
+                refresh_paths, refresh_manifest = run_paper_data_refresh(
+                    config_path=config.data_refresh_config_path,
+                    skip_download=effective_skip_download,
+                    skip_cboe=effective_skip_cboe,
+                    output_dir=root / "open_data_refresh",
+                )
+                finish_step("open_data_refresh", step_started)
+                latest_price = latest_operational_price(config_path=config.signal_runner_config_path, as_of=server_time)
+                price_exit = take_profit_status(state, latest_price=latest_price)
+                manifest.update(
+                    {
+                        "paths": {**manifest["paths"], "open_data_refresh": _paths_to_dict(refresh_paths)},
+                        "data_refresh": {"status": refresh_manifest.get("run", {}).get("status"), "date_window": refresh_manifest.get("date_window", {})},
+                        "price_exit_monitor": price_exit,
+                    }
+                )
+            if not fixed_exit["due"] and not price_exit.get("due"):
+                manifest.update({"decision": "monitoring_open_position", "reason": price_exit.get("reason") or fixed_exit["reason"]})
                 return write_manifest_and_report(manifest)
 
-            exit_ticket = build_exit_ticket(state, config)
+            exit_reason = price_exit.get("reason") if price_exit.get("due") else fixed_exit["reason"]
+            exit_ticket = build_exit_ticket(state, config, reason=str(exit_reason), latest_price=latest_price)
             exit_ticket_path = write_sized_ticket(exit_ticket, root / "exit_ticket")
             manifest.update({"paths": {**manifest["paths"], "exit_ticket": exit_ticket_path.as_posix()}, "exit_ticket": exit_ticket})
             if float(exit_ticket.get("quantity", 0.0) or 0.0) <= 0.0 or not exit_ticket.get("theoretical_exit_timestamp"):
@@ -711,7 +556,7 @@ def run_h1c_auto(
         )
         finish_step("data_refresh", step_started)
         step_started = time.perf_counter()
-        signal_paths, signal_summary = run_h1c_signal_runner(config_path=config.signal_runner_config_path, output_dir=root / "signal")
+        signal_paths, signal_summary = run_setup_signal_runner(config_path=config.signal_runner_config_path, output_dir=root / "signal")
         finish_step("signal", step_started)
         raw_ticket = signal_summary["ticket"]
         account_summary = _account_summary_from_reconciliation(pre_recon_manifest)
@@ -741,7 +586,7 @@ def run_h1c_auto(
             manifest.update(
                 {
                     "decision": "no_signal",
-                    "reason": "H1c signal is NONE",
+                    "reason": f"{config.candidate_id} signal is NONE",
                     "paths": {**manifest["paths"], "state": _paths_to_dict(state_paths)},
                     "state": state_summary,
                 }
@@ -755,7 +600,7 @@ def run_h1c_auto(
             manifest.update({"decision": "blocked_funds", "reason": "; ".join(funds["errors"])})
             return write_manifest_and_report(manifest)
 
-        entry_safety = entry_safety_check(config, output_dir=base_output_dir, created_at_utc=created)
+        entry_safety = setup_entry_safety_check(config, output_dir=base_output_dir, created_at_utc=created)
         manifest["entry_safety"] = entry_safety
         if not entry_safety["ok"]:
             manifest.update({"decision": "blocked_entry_safety", "reason": "; ".join(entry_safety["issues"])})
@@ -821,13 +666,13 @@ def run_h1c_auto(
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Automatic paper-only H1c runner with market-open, reconciliation, funds, and duplicate-order guardrails")
+    parser = argparse.ArgumentParser(description="Automatic paper-only setup-signal runner with market-open, reconciliation, funds, and order guardrails")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
     parser.add_argument("--skip-download", action="store_true")
     parser.add_argument("--skip-cboe", action="store_true")
     parser.add_argument("--output-dir", default=None)
     args = parser.parse_args(argv)
-    paths, manifest = run_h1c_auto(
+    paths, manifest = run_setup_signal_auto(
         config_path=args.config,
         skip_download=True if args.skip_download else None,
         skip_cboe=True if args.skip_cboe else None,

@@ -1,0 +1,24 @@
+plan:
+  strategy_id: c2_h9_googl_5min_opening_bias_followthrough_v1
+  account: DU9782002
+  symbol: GOOGL
+  position_side: long
+  sec_type: STK
+  currency: USD
+  routing_exchange: SMART
+  primary_exchange: NASDAQ
+  require_reconciliation_ok: true
+  allowed_reconciliation_decisions:
+    - OK_FLAT
+  exit_allowed_reconciliation_decisions:
+    - OK_OPEN
+  max_quantity: 1000000
+
+execution_policy:
+  order_type: MKT
+  tif: DAY
+  outside_rth: false
+  intent: c2_long_entry
+
+outputs:
+  output_dir: results/paper/c2_order_plan

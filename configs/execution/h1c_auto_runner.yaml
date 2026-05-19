@@ -12,7 +12,7 @@ auto:
   default_skip_download: false
   min_available_funds_usd: 1000
   min_buying_power_usd: 1000
-  max_order_notional_usd: null
+  max_order_notional_usd: 10000
   sizing_mode: buying_power_fraction
   capital_fraction: 1.0
   reserve_cash_usd: 0

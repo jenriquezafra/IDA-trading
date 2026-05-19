@@ -22,6 +22,7 @@ class H1COrderPlanConfig:
     strategy_id: str
     account: str
     symbol: str
+    position_side: str
     sec_type: str
     currency: str
     routing_exchange: str
@@ -41,6 +42,7 @@ class H1COrderPlanConfig:
             strategy_id=str(plan.get("strategy_id", "")).strip(),
             account=str(plan.get("account", "")).strip(),
             symbol=str(plan.get("symbol", "QQQ")).strip().upper(),
+            position_side=str(plan.get("position_side", "short")).strip().lower(),
             sec_type=str(plan.get("sec_type", "STK")).strip().upper(),
             currency=str(plan.get("currency", "USD")).strip().upper(),
             routing_exchange=str(plan.get("routing_exchange", "SMART")).strip().upper(),
@@ -62,6 +64,8 @@ class H1COrderPlanConfig:
             raise ValueError("plan.account is required")
         if self.sec_type != "STK":
             raise ValueError("H1c order planner currently supports STK only")
+        if self.position_side not in {"long", "short"}:
+            raise ValueError("plan.position_side must be long or short")
         if self.max_quantity <= 0:
             raise ValueError("max_quantity must be positive")
 
@@ -114,6 +118,26 @@ def _reference_price(ticket: dict[str, Any], action: str) -> float:
     return 0.0
 
 
+def _entry_action(position_side: str) -> str:
+    return "BUY" if position_side == "long" else "SELL"
+
+
+def _exit_action(position_side: str) -> str:
+    return "SELL" if position_side == "long" else "BUY"
+
+
+def _order_intent(action: str, config: H1COrderPlanConfig) -> str:
+    if action == _entry_action(config.position_side):
+        if config.position_side == "short" and config.strategy_id == "qqq_15min_risk_off_short_h1c_v1":
+            return "h1c_short_entry"
+        return f"{config.strategy_id}_{config.position_side}_entry"
+    if action == _exit_action(config.position_side):
+        if config.position_side == "short" and config.strategy_id == "qqq_15min_risk_off_short_h1c_v1":
+            return "h1c_short_exit"
+        return f"{config.strategy_id}_{config.position_side}_exit"
+    return f"{config.strategy_id}_order"
+
+
 def build_h1c_order_plan(ticket: dict[str, Any], reconciliation_manifest: dict[str, Any] | None, config: H1COrderPlanConfig) -> tuple[pd.DataFrame, dict[str, Any]]:
     if ticket.get("strategy_id") != config.strategy_id:
         raise ValueError("ticket strategy_id does not match plan config")
@@ -129,7 +153,7 @@ def build_h1c_order_plan(ticket: dict[str, Any], reconciliation_manifest: dict[s
     allowed_reconciliation_decisions = config.exit_allowed_reconciliation_decisions if action == "BUY" else config.allowed_reconciliation_decisions
     reconciliation_ok = reconciliation_decision in set(allowed_reconciliation_decisions)
     reference_price = _reference_price(ticket, action)
-    intent = "h1c_short_exit" if action == "BUY" else "h1c_short_entry"
+    intent = _order_intent(action, config)
 
     orders: list[dict[str, Any]] = []
     block_reason = ""

@@ -1,0 +1,12 @@
+accounting:
+  strategy_id: c2_h9_googl_5min_opening_bias_followthrough_v1
+  account: DU9782002
+  symbol: GOOGL
+  position_side: long
+  state_config_path: configs/execution/paper_state_c2.yaml
+  pnl_log_path: results/paper/c2_state/pnl_events.parquet
+  allow_open_from_position_without_execution: true
+  allow_flatten_without_pending_exit: false
+
+outputs:
+  output_dir: results/paper/c2_accounting

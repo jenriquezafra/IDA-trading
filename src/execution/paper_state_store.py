@@ -20,6 +20,7 @@ class PaperStateConfig:
     strategy_id: str
     account: str
     symbol: str
+    position_side: str
     state_path: Path
     event_log_path: Path
     output_dir: Path
@@ -32,6 +33,7 @@ class PaperStateConfig:
             strategy_id=str(state.get("strategy_id", "")).strip(),
             account=str(state.get("account", "")).strip(),
             symbol=str(state.get("symbol", "")).strip().upper(),
+            position_side=str(state.get("position_side", "short")).strip().lower(),
             state_path=Path(state.get("state_path", "results/paper/h1c_state/state.yaml")),
             event_log_path=Path(state.get("event_log_path", "results/paper/h1c_state/events.parquet")),
             output_dir=Path(state.get("output_dir", "results/paper/h1c_state/runs")),
@@ -47,6 +49,8 @@ class PaperStateConfig:
             raise ValueError("state.account is required")
         if not self.symbol:
             raise ValueError("state.symbol is required")
+        if self.position_side not in {"long", "short"}:
+            raise ValueError("state.position_side must be long or short")
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -84,6 +88,7 @@ def initial_state(config: PaperStateConfig) -> dict[str, Any]:
         "strategy_id": config.strategy_id,
         "account": config.account,
         "symbol": config.symbol,
+        "position_side": config.position_side,
         "status": "flat",
         "position_unit": 0.0,
         "quantity": 0.0,
@@ -131,6 +136,8 @@ def validate_state(state: dict[str, Any], config: PaperStateConfig) -> None:
         raise ValueError("state symbol does not match config")
     if state.get("status") not in VALID_STATUSES:
         raise ValueError(f"unsupported state status: {state.get('status')}")
+    if state.get("position_side") not in {None, config.position_side}:
+        raise ValueError("state position_side does not match config")
 
 
 def validate_ticket(ticket: dict[str, Any], config: PaperStateConfig) -> None:
@@ -151,6 +158,18 @@ def _ticket_key(ticket: dict[str, Any]) -> str:
     return f"{ticket.get('strategy_id')}|{ticket.get('symbol')}|{ticket.get('signal_timestamp')}|{ticket.get('action')}|{ticket.get('quantity')}"
 
 
+def _position_unit(side: str) -> float:
+    return 1.0 if side == "long" else -1.0
+
+
+def _entry_action(side: str) -> str:
+    return "BUY" if side == "long" else "SELL"
+
+
+def _exit_action(side: str) -> str:
+    return "SELL" if side == "long" else "BUY"
+
+
 def apply_ticket_to_state(state: dict[str, Any], ticket: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     updated = dict(state)
     now = utc_now()
@@ -158,15 +177,20 @@ def apply_ticket_to_state(state: dict[str, Any], ticket: dict[str, Any]) -> tupl
     desired = float(ticket.get("desired_position_unit", 0.0) or 0.0)
     quantity = float(ticket.get("quantity", 0.0) or 0.0)
     status = str(updated.get("status", "flat"))
+    side = str(updated.get("position_side") or ("long" if desired > 0 else "short")).lower()
+    side_unit = _position_unit(side)
+    entry_action = _entry_action(side)
+    exit_action = _exit_action(side)
     previous_ticket = updated.get("pending_ticket") or {}
     duplicate_pending = bool(status in {"pending_entry", "pending_exit"} and previous_ticket.get("ticket_key") == _ticket_key(ticket))
 
     event_type = "no_change"
     if duplicate_pending:
         event_type = "duplicate_pending_ticket_ignored"
-    elif status == "flat" and action == "SELL" and desired < 0.0 and quantity > 0.0:
+    elif status == "flat" and action == entry_action and desired == side_unit and quantity > 0.0:
         event_type = "pending_entry_created"
         updated["status"] = "pending_entry"
+        updated["position_side"] = side
         updated["position_unit"] = 0.0
         updated["quantity"] = 0.0
         updated["desired_position_unit"] = desired
@@ -177,17 +201,23 @@ def apply_ticket_to_state(state: dict[str, Any], ticket: dict[str, Any]) -> tupl
             "order_type": ticket.get("order_type"),
             "time_in_force": ticket.get("time_in_force"),
             "signal_timestamp": ticket.get("signal_timestamp"),
+            "session": ticket.get("session"),
+            "bar_index": ticket.get("bar_index"),
             "theoretical_entry_timestamp": ticket.get("theoretical_entry_timestamp"),
             "theoretical_entry_price": ticket.get("theoretical_entry_price"),
             "theoretical_exit_timestamp": ticket.get("theoretical_exit_timestamp"),
             "theoretical_exit_price": ticket.get("theoretical_exit_price"),
             "exit_rule": ticket.get("exit_rule"),
             "horizon_bars": ticket.get("horizon_bars"),
+            "min_hold_bars": ticket.get("min_hold_bars"),
+            "stop_loss_bps": ticket.get("stop_loss_bps"),
+            "take_profit_bps": ticket.get("take_profit_bps"),
             "status": "awaiting_fill_or_simulated_fill",
         }
-    elif status == "open" and action == "BUY" and desired == 0.0 and quantity > 0.0:
+    elif status == "open" and action == exit_action and desired == 0.0 and quantity > 0.0:
         event_type = "pending_exit_created"
         updated["status"] = "pending_exit"
+        updated["position_side"] = side
         updated["desired_position_unit"] = 0.0
         updated["pending_ticket"] = {
             "ticket_key": _ticket_key(ticket),
@@ -196,12 +226,17 @@ def apply_ticket_to_state(state: dict[str, Any], ticket: dict[str, Any]) -> tupl
             "order_type": ticket.get("order_type"),
             "time_in_force": ticket.get("time_in_force"),
             "signal_timestamp": ticket.get("signal_timestamp"),
+            "session": ticket.get("session"),
+            "bar_index": ticket.get("bar_index"),
             "theoretical_entry_timestamp": ticket.get("theoretical_entry_timestamp"),
             "theoretical_entry_price": ticket.get("theoretical_entry_price"),
             "theoretical_exit_timestamp": ticket.get("theoretical_exit_timestamp"),
             "theoretical_exit_price": ticket.get("theoretical_exit_price"),
             "exit_rule": ticket.get("exit_rule"),
             "horizon_bars": ticket.get("horizon_bars"),
+            "min_hold_bars": ticket.get("min_hold_bars"),
+            "stop_loss_bps": ticket.get("stop_loss_bps"),
+            "take_profit_bps": ticket.get("take_profit_bps"),
             "status": "awaiting_exit_fill",
         }
     elif status == "flat" and action == "NONE":
